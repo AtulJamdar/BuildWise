@@ -1,0 +1,38 @@
+# --- Python Environment ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+.env
+
+# --- Database ---
+# If using SQLite locally
+*.sqlite3
+*.db
+
+# --- AI & Environment Secrets ---
+# VERY IMPORTANT: Keep your Groq/OpenAI keys private
+.env
+secret_keys.py
+
+# --- IDE & Editor Settings ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- OS Generated Files ---
+.DS_Store
+Thumbs.db
+
+# --- Build & Distribution ---
+dist/
+build/
+*.egg-info/
+
+# --- Project Specific ---
+# Ignore the actual reports if they are saved as local JSON/HTML files
+reports_data/
+*.log
