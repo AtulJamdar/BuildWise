@@ -8,6 +8,10 @@ function App() {
   const [issues, setIssues] = useState([]);
   const [selectedIssue, setSelectedIssue] = useState(null);
 
+  // AI Suggestions State
+  const [aiSuggestions, setAiSuggestions] = useState([]);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+
   // --- HELPERS ---
   const getSeverityColor = (severity) => {
     switch (severity) {
@@ -28,6 +32,7 @@ function App() {
   };
 
   // --- API FETCH FUNCTIONS ---
+
   useEffect(() => {
     fetch("http://127.0.0.1:8000/projects")
       .then((res) => res.json())
@@ -43,8 +48,33 @@ function App() {
         setSelectedScan(null);
         setIssues([]);
         setSelectedIssue(null);
+        setAiSuggestions([]);
       })
       .catch((err) => console.error("Error fetching scans:", err));
+  };
+
+  // Fetch AI Suggestions Logic
+  const fetchAISuggestions = (currentIssues) => {
+    if (!selectedProject || currentIssues.length === 0) return;
+    
+    setIsAiLoading(true);
+    fetch("http://127.0.0.1:8000/ai/suggestions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_name: selectedProject.name,
+        issues: currentIssues,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        setAiSuggestions(data.suggestions);
+        setIsAiLoading(false);
+      })
+      .catch((err) => {
+        console.error("AI Error:", err);
+        setIsAiLoading(false);
+      });
   };
 
   const fetchIssues = (scanId) => {
@@ -53,6 +83,7 @@ function App() {
       .then((data) => {
         setIssues(data);
         setSelectedIssue(null);
+        setTimeout(() => fetchAISuggestions(data), 300);
       })
       .catch((err) => console.error("Error fetching issues:", err));
   };
@@ -79,14 +110,13 @@ function App() {
   };
 
   return (
-    // 🧠 Step 1 — Layout Structure (Flex Row)
     <div className="flex min-h-screen bg-gray-100 font-sans">
       
-      {/* 🧠 Step 2 — Sidebar */}
+      {/* Sidebar - Buttons Restored */}
       <aside className="w-64 bg-white shadow-xl flex flex-col border-r border-gray-200">
         <div className="p-6">
           <h2 className="text-2xl font-black text-blue-600 tracking-tighter">BuildWise</h2>
-          <p className="text-[10px] uppercase tracking-widest text-gray-400 font-bold mt-1">Security Suite</p>
+          <p className="text-[10px] uppercase tracking-widest text-gray-400 font-bold mt-1">AI Security Suite</p>
         </div>
 
         <nav className="flex-1 px-4 space-y-2">
@@ -105,20 +135,19 @@ function App() {
         </nav>
 
         <div className="p-4 border-t">
-            <div className="bg-slate-900 rounded-xl p-4 text-white">
-                <p className="text-[10px] font-bold opacity-50 uppercase">Current Plan</p>
-                <p className="text-sm font-bold">Developer Pro</p>
-            </div>
+          <div className="bg-slate-900 rounded-xl p-4 text-white">
+            <p className="text-[10px] font-bold opacity-50 uppercase">Current Plan</p>
+            <p className="text-sm font-bold">Developer Pro</p>
+          </div>
         </div>
       </aside>
 
-      {/* 🧠 Step 3 — Main Content Area */}
+      {/* Main Content Area */}
       <main className="flex-1 flex flex-col h-screen overflow-y-auto">
         
-        {/* 🧠 Step 4 — Header */}
+        {/* Header */}
         <header className="flex justify-between items-center bg-white px-8 py-4 shadow-sm border-b sticky top-0 z-10">
-          <h1 className="text-xl font-bold text-gray-800">Dashboard</h1>
-          
+          <h1 className="text-xl font-bold text-gray-800">Dashboard Overview</h1>
           <div className="flex items-center gap-6">
             <div className="text-right">
               <p className="text-sm font-bold text-gray-900">Atul Sunil Jamdar</p>
@@ -130,7 +159,6 @@ function App() {
           </div>
         </header>
 
-        {/* --- Actual Dashboard Content --- */}
         <div className="p-8 space-y-10">
           
           {/* Projects Section */}
@@ -140,10 +168,7 @@ function App() {
               {projects.map((project) => (
                 <div
                   key={project.id}
-                  onClick={() => {
-                    setSelectedProject(project);
-                    fetchScans(project.id);
-                  }}
+                  onClick={() => { setSelectedProject(project); fetchScans(project.id); }}
                   className={`p-6 rounded-2xl shadow-sm transition-all cursor-pointer border-2 ${
                     selectedProject?.id === project.id 
                     ? "bg-white border-blue-600 ring-4 ring-blue-50" 
@@ -151,34 +176,27 @@ function App() {
                   }`}
                 >
                   <h2 className="text-lg font-bold text-gray-800">{project.name}</h2>
-                  <p className="text-gray-500 mt-1 text-xs">Scan Count: {project.total_scans}</p>
+                  <p className="text-gray-500 mt-1 text-xs font-medium">Scans: {project.total_scans}</p>
                 </div>
               ))}
             </div>
           </section>
 
-          {/* Scans History Section */}
+          {/* Scan History Section */}
           {selectedProject && (
             <section className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
-              <h2 className="text-sm font-black text-gray-400 uppercase tracking-widest">
-                Scan History: {selectedProject.name}
-              </h2>
+              <h2 className="text-sm font-black text-gray-400 uppercase tracking-widest">Scan History: {selectedProject.name}</h2>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {scans.map((scan) => (
                   <div
                     key={scan.id}
-                    onClick={() => {
-                      setSelectedScan(scan);
-                      fetchIssues(scan.id);
-                    }}
+                    onClick={() => { setSelectedScan(scan); fetchIssues(scan.id); }}
                     className={`p-5 rounded-2xl border-2 transition-all cursor-pointer ${
-                      selectedScan?.id === scan.id 
-                      ? "bg-gray-900 text-white border-gray-900 shadow-xl" 
-                      : "bg-white text-gray-700 border-gray-100 hover:border-gray-300 shadow-sm"
+                      selectedScan?.id === scan.id ? "bg-gray-900 text-white border-gray-900 shadow-xl scale-105" : "bg-white text-gray-700 border-gray-100 hover:border-gray-300"
                     }`}
                   >
                     <p className="text-xs font-mono opacity-50 uppercase">Scan #{scan.id}</p>
-                    <p className="text-2xl font-black mt-2">{scan.score}%</p>
+                    <p className="text-2xl font-black mt-2">{scan.score}% Score</p>
                     <p className="text-[10px] mt-3 uppercase opacity-40">{new Date(scan.created_at).toLocaleDateString()}</p>
                   </div>
                 ))}
@@ -186,50 +204,79 @@ function App() {
             </section>
           )}
 
-          {/* Issues & Details Section */}
+          {/* Issues, AI Panel & Detail Box Layout */}
           <div className="grid lg:grid-cols-2 gap-8 items-start">
             
-            {/* Issue List */}
-            {selectedScan && (
-              <section className="space-y-4">
-                <h2 className="text-sm font-black text-gray-400 uppercase tracking-widest">Detected Issues</h2>
-                <div className="space-y-3">
-                  {issues.length === 0 ? (
-                    <div className="p-8 bg-white rounded-2xl text-center border-2 border-dashed">
-                      <p className="text-green-500 font-bold italic">No security vulnerabilities found.</p>
-                    </div>
-                  ) : (
-                    issues.map((issue) => (
-                      <div
-                        key={issue.id}
-                        onClick={() => fetchIssueDetail(issue.id)}
-                        className={`p-5 bg-white rounded-2xl shadow-sm hover:shadow-md cursor-pointer transition-all border-2 ${
-                          selectedIssue?.id === issue.id ? "border-blue-500 ring-2 ring-blue-50" : "border-transparent"
-                        }`}
-                      >
-                        <div className="flex justify-between items-center">
-                          <h3 className={`text-sm font-bold ${getSeverityColor(issue.severity)}`}>
-                            [{issue.severity}] {issue.title}
-                          </h3>
-                          <span className={`px-2.5 py-1 text-[10px] font-black rounded-lg uppercase ${getStatusBadge(issue.status)}`}>
-                            {issue.status}
-                          </span>
-                        </div>
-                        <p className="text-gray-400 mt-2 text-[10px] font-mono truncate bg-gray-50 p-2 rounded-lg">{issue.file}</p>
+            <div className="space-y-8">
+              {/* Issue List */}
+              {selectedScan && (
+                <section className="space-y-4">
+                  <h2 className="text-sm font-black text-gray-400 uppercase tracking-widest">Detected Issues</h2>
+                  <div className="space-y-3">
+                    {issues.length === 0 ? (
+                      <div className="p-8 bg-white rounded-2xl text-center border-2 border-dashed">
+                        <p className="text-green-500 font-bold italic">No vulnerabilities found.</p>
                       </div>
-                    ))
-                  )}
-                </div>
-              </section>
-            )}
+                    ) : (
+                      issues.map((issue) => (
+                        <div
+                          key={issue.id}
+                          onClick={() => fetchIssueDetail(issue.id)}
+                          className={`p-5 bg-white rounded-2xl shadow-sm hover:shadow-md cursor-pointer transition-all border-2 ${
+                            selectedIssue?.id === issue.id ? "border-blue-500 ring-2 ring-blue-50" : "border-transparent"
+                          }`}
+                        >
+                          <div className="flex justify-between items-center">
+                            <h3 className={`text-sm font-bold ${getSeverityColor(issue.severity)}`}>
+                              [{issue.severity}] {issue.title}
+                            </h3>
+                            <span className={`px-2.5 py-1 text-[10px] font-black rounded-lg uppercase ${getStatusBadge(issue.status)}`}>
+                              {issue.status}
+                            </span>
+                          </div>
+                          <p className="text-gray-400 mt-2 text-[10px] font-mono truncate bg-gray-50 p-2 rounded-lg">{issue.file}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </section>
+              )}
 
-            {/* Issue Detail Box */}
+              {/* AI Suggestions Panel Restored */}
+              {(aiSuggestions.length > 0 || isAiLoading) && (
+                <section className="animate-in fade-in zoom-in-95 duration-500">
+                  <div className="p-6 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-3xl shadow-2xl overflow-hidden relative">
+                    <div className="absolute top-0 right-0 p-4 opacity-10"><span className="text-8xl">🤖</span></div>
+                    <h2 className="text-xl font-black mb-4 flex items-center gap-2">
+                      <span className="bg-white/20 p-1 rounded-lg">✨</span> AI Insights
+                    </h2>
+                    {isAiLoading ? (
+                      <div className="flex items-center gap-3">
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        <p className="text-sm font-medium animate-pulse">Consulting BuildWise AI...</p>
+                      </div>
+                    ) : (
+                      <ul className="space-y-3">
+                        {aiSuggestions.map((s, index) => (
+                          <li key={index} className="flex items-start gap-3 bg-white/10 p-3 rounded-xl border border-white/10 hover:bg-white/20 transition-all">
+                            <span className="text-blue-200 font-bold">●</span>
+                            <span className="text-sm font-medium leading-relaxed">{s}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </section>
+              )}
+            </div>
+
+            {/* Issue Detail Box - Styled Restored */}
             {selectedIssue && (
               <section className="sticky top-24 animate-in zoom-in-95 duration-200">
                 <div className="p-8 bg-white rounded-3xl shadow-2xl border border-gray-100 ring-1 ring-black/5">
                   <div className="flex justify-between items-start mb-8">
                     <h2 className="text-xl font-black text-gray-900 uppercase tracking-tight">Issue Report</h2>
-                    <button onClick={() => setSelectedIssue(null)} className="text-gray-300 hover:text-gray-900 transition-colors">✕</button>
+                    <button onClick={() => setSelectedIssue(null)} className="text-gray-300 hover:text-gray-900">✕</button>
                   </div>
 
                   <div className="space-y-6 text-sm">
@@ -243,33 +290,19 @@ function App() {
                       </div>
                     </div>
 
-                    <div>
-                      <p className="text-[10px] font-black text-gray-400 uppercase mb-2">Analysis</p>
-                      <div className="bg-red-50 p-5 rounded-2xl border border-red-100">
-                        <p className="text-red-900 leading-relaxed font-medium">{selectedIssue.why}</p>
-                      </div>
+                    <div className="bg-red-50 p-5 rounded-2xl border border-red-100">
+                      <p className="text-[10px] font-black text-red-400 uppercase mb-2">The Problem</p>
+                      <p className="text-red-900 leading-relaxed font-medium">{selectedIssue.why}</p>
                     </div>
 
-                    <div>
-                      <p className="text-[10px] font-black text-gray-400 uppercase mb-2">Resolution Guide</p>
-                      <div className="bg-green-50 p-5 rounded-2xl border border-green-100">
-                        <p className="text-green-900 leading-relaxed font-medium">{selectedIssue.fix}</p>
-                      </div>
+                    <div className="bg-green-50 p-5 rounded-2xl border border-green-100">
+                      <p className="text-[10px] font-black text-green-400 uppercase mb-2">Resolution Guide</p>
+                      <p className="text-green-900 leading-relaxed font-medium">{selectedIssue.fix}</p>
                     </div>
 
                     <div className="pt-8 flex gap-4">
-                      <button
-                        onClick={() => updateIssueStatus(selectedIssue.id, "FIXED")}
-                        className="flex-1 px-4 py-4 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl transition-all shadow-xl shadow-blue-200 uppercase text-xs tracking-widest"
-                      >
-                        Mark as Fixed
-                      </button>
-                      <button
-                        onClick={() => updateIssueStatus(selectedIssue.id, "IGNORED")}
-                        className="flex-1 px-4 py-4 bg-gray-100 hover:bg-gray-200 text-gray-500 font-black rounded-2xl transition-all uppercase text-xs tracking-widest"
-                      >
-                        Ignore
-                      </button>
+                      <button onClick={() => updateIssueStatus(selectedIssue.id, "FIXED")} className="flex-1 px-4 py-4 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl transition-all shadow-xl shadow-blue-200 uppercase text-xs tracking-widest">Mark Fixed</button>
+                      <button onClick={() => updateIssueStatus(selectedIssue.id, "IGNORED")} className="flex-1 px-4 py-4 bg-gray-100 hover:bg-gray-200 text-gray-500 font-black rounded-2xl uppercase text-xs tracking-widest">Ignore</button>
                     </div>
                   </div>
                 </div>
