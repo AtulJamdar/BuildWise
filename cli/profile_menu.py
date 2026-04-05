@@ -1,4 +1,4 @@
-from auth.user_service import view_profile, update_email
+from core.user_service import view_profile, update_email
 from utils.session import clear_session
 
 def profile_menu():

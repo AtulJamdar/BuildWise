@@ -1,62 +1,55 @@
 from db.connection import get_connection
 from utils.session import get_logged_in_user
 
-def get_or_create_project(project_name, repo_url=None):
+def get_or_create_project(name, repo_url, user_id):
     conn = get_connection()
     cur = conn.cursor()
-
-    username = get_logged_in_user()
-
-    # Check if project exists
-    cur.execute(
-        "SELECT id FROM projects WHERE username=%s AND project_name=%s",
-        (username, project_name)
-    )
-
-    result = cur.fetchone()
-
-    if result:
-        project_id = result[0]
-    else:
+    try:
+        # 1. Check if THIS user already has a project with this name
         cur.execute(
-            "INSERT INTO projects (username, project_name, repo_url) VALUES (%s, %s, %s) RETURNING id",
-            (username, project_name, repo_url)
+            "SELECT id FROM projects WHERE name = %s AND user_id = %s", 
+            (name, user_id)
         )
-        project_id = cur.fetchone()[0]
+        project = cur.fetchone()
+
+        if project:
+            return project[0]  # Return existing ID
+
+        # 2. If not, create a NEW project linked to this user
+        cur.execute(
+            "INSERT INTO projects (name, repo_url, user_id) VALUES (%s, %s, %s) RETURNING id",
+            (name, repo_url, user_id)
+        )
+        new_id = cur.fetchone()[0]
         conn.commit()
+        return new_id
+    finally:
+        cur.close()
+        conn.close()
 
-    cur.close()
-    conn.close()
-
-    return project_id
-
-def get_user_projects():
-    from db.connection import get_connection
-    from utils.session import get_logged_in_user
-
+def get_user_projects(user_id):
+    """
+    Fetches only the projects belonging to the specific logged-in user.
+    """
     conn = get_connection()
     cur = conn.cursor()
-
-    username = get_logged_in_user()
-
-    cur.execute(
+    
+    try:
+        # 🔒 SQL FIX: Filter by user_id so users can't see each other's data
+        query = """
+            SELECT id, name, total_scans 
+            FROM projects 
+            WHERE user_id = %s
         """
-        SELECT p.id, p.project_name, COUNT(r.id) as total_scans
-        FROM projects p
-        LEFT JOIN reports r ON p.id = r.project_id
-        WHERE p.username = %s
-        GROUP BY p.id
-        ORDER BY p.id DESC
-        """,
-        (username,)
-    )
-
-    projects = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return projects
+        cur.execute(query, (user_id,))
+        projects = cur.fetchall()
+        return projects
+    except Exception as e:
+        print(f"Database Error in get_user_projects: {e}")
+        return []
+    finally:
+        cur.close()
+        conn.close()
 
 def get_project_scans(project_id):
     from db.connection import get_connection
