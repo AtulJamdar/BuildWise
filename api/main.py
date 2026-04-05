@@ -5,8 +5,18 @@ from core.project_service import get_project_scans
 from core.issue_service import get_scan_issues
 from core.issue_service import get_issue_by_id
 from core.issue_service import update_issue_status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Body
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # for development only
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/")
@@ -80,7 +90,6 @@ def get_issue(issue_id: int):
     }
 
 
-from fastapi import Body
 
 @app.put("/issues/{issue_id}")
 def update_issue(issue_id: int, data: dict = Body(...)):
