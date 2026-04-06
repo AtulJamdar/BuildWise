@@ -4,6 +4,7 @@ import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Onboarding from "./pages/Onboarding";
+import Profile from "./pages/Profile";
 
 // --- DASHBOARD COMPONENT ---
 // This contains all your logic for projects, scans, and AI
@@ -293,6 +294,7 @@ const Dashboard = () => {
           <button className="flex items-center w-full text-left px-4 py-3 rounded-xl bg-blue-50 text-blue-700 font-bold">📊 Dashboard</button>
           <button className="flex items-center w-full text-left px-4 py-3 rounded-xl text-gray-500 hover:bg-gray-50">📁 Projects</button>
           <button className="flex items-center w-full text-left px-4 py-3 rounded-xl text-gray-500 hover:bg-gray-50">📝 Reports</button>
+          <button onClick={() => navigate("/profile")} className="flex items-center w-full text-left px-4 py-3 rounded-xl text-gray-500 hover:bg-gray-50">👤 Profile</button>
           <button className="flex items-center w-full text-left px-4 py-3 rounded-xl text-gray-500 hover:bg-gray-50">⚙️ Settings</button>
         </nav>
         <div className="p-4 border-t">
@@ -546,6 +548,7 @@ function App() {
         <Route path="/register" element={<Register />} />
         {/* We keep your dashboard on a specific route */}
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/profile" element={<Profile />} />
       </Routes>
     </BrowserRouter>
   );

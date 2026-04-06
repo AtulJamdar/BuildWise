@@ -290,6 +290,96 @@ def save_onboarding(data: dict = Body(...), user_id: int = Depends(get_current_u
         cur.close()
         conn.close()
 
+# --- 👤 PROFILE MANAGEMENT ---
+
+@app.get("/profile")
+def get_profile(user_id: int = Depends(get_current_user)):
+    """
+    Retrieve user profile information including name, email, role, experience, and tech stack.
+    """
+    from db.connection import get_connection
+    print(f"📋 Fetching profile for user_id: {user_id}")
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT username, email, role_type, experience_level, tech_stack
+            FROM users
+            WHERE id=%s
+            """,
+            (user_id,)
+        )
+
+        user = cur.fetchone()
+
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        print(f"✅ Profile retrieved: {user[0]}")
+        
+        return {
+            "name": user[0],
+            "email": user[1],
+            "role_type": user[2],
+            "experience_level": user[3],
+            "tech_stack": user[4]
+        }
+    except Exception as e:
+        print(f"❌ Error fetching profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.put("/profile")
+def update_profile(
+    data: dict = Body(...),
+    user_id: int = Depends(get_current_user)
+):
+    """
+    Update user profile information (name, role, experience level, tech stack).
+    """
+    from db.connection import get_connection
+    print(f"✏️ Updating profile for user_id: {user_id}")
+    print(f"📝 Update data: {data}")
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            UPDATE users
+            SET username=%s,
+                role_type=%s,
+                experience_level=%s,
+                tech_stack=%s
+            WHERE id=%s
+            """,
+            (
+                data.get("name"),
+                data.get("role_type"),
+                data.get("experience_level"),
+                data.get("tech_stack"),
+                user_id
+            )
+        )
+
+        conn.commit()
+        print(f"✅ Profile updated successfully for user_id: {user_id}")
+        return {"message": "Profile updated successfully"}
+    except Exception as e:
+        conn.rollback()
+        print(f"❌ Error updating profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
 
 @app.post("/scan")
 async def run_security_scan(data: dict = Body(...), user_id: int = Depends(get_current_user)):
