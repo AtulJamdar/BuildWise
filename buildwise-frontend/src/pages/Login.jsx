@@ -46,6 +46,17 @@ export default function Login() {
     }
   };
 
+  const handleGitHubLogin = async () => {
+  try {
+    const res = await fetch("http://127.0.0.1:8000/auth/github");
+    const data = await res.json();
+    // Redirect the whole browser window to GitHub
+    window.location.href = data.url;
+  } catch (err) {
+    alert("GitHub Login failed to initialize.");
+  }
+};
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-gray-100">
       <div className="p-8 bg-white rounded-xl shadow w-96">
@@ -83,6 +94,13 @@ export default function Login() {
           >
             Login
           </button>
+
+          <button
+  onClick={handleGitHubLogin}
+  className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-xl hover:bg-black transition-all mt-4 font-bold"
+>
+  <i className="fab fa-github"></i> Login with GitHub
+</button>
         </form>
 
         <p

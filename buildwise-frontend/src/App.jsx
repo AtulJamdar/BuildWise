@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Onboarding from "./pages/Onboarding";
 import Profile from "./pages/Profile";
+import OAuthSuccess from "./pages/OAuthSuccess";
 
 // --- DASHBOARD COMPONENT ---
 // This contains all your logic for projects, scans, and AI
@@ -549,6 +550,7 @@ function App() {
         {/* We keep your dashboard on a specific route */}
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/oauth-success" element={<OAuthSuccess />} />
       </Routes>
     </BrowserRouter>
   );

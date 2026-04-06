@@ -13,6 +13,8 @@ from core.scanner import scan_project
 from core.user_service import login_user, register_user, generate_reset_token, reset_password
 from utils.dependencies import get_current_user
 from core.repo_scanner import scan_github_repo
+import requests
+from fastapi.responses import RedirectResponse
 
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -408,3 +410,57 @@ async def run_security_scan(data: dict = Body(...), user_id: int = Depends(get_c
     except Exception as e:
         print(f"❌ Scan Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- 🐙 GITHUB OAUTH ENDPOINTS ---
+
+@app.get("/auth/github")
+def github_login():
+    client_id = os.getenv("GITHUB_CLIENT_ID")
+    # This URL sends the user to GitHub's consent screen
+    url = f"https://github.com/login/oauth/authorize?client_id={client_id}&scope=user:email"
+    return {"url": url}
+
+@app.get("/auth/github/callback")
+def github_callback(code: str):
+    client_id = os.getenv("GITHUB_CLIENT_ID")
+    client_secret = os.getenv("GITHUB_CLIENT_SECRET")
+
+    # 1. Exchange code for Access Token
+    token_res = requests.post(
+        "https://github.com/login/oauth/access_token",
+        headers={"Accept": "application/json"},
+        data={
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+        },
+    )
+    access_token = token_res.json().get("access_token")
+
+    # 2. Get User Info from GitHub API
+    user_res = requests.get(
+        "https://api.github.com/user",
+        headers={"Authorization": f"token {access_token}"}
+    )
+    user_data = user_res.json()
+
+    # Handle cases where email might be private
+    email = user_data.get("email") or f"{user_data['login']}@github.com"
+    name = user_data.get("name") or user_data.get("login")
+
+    # 3. Register or Login the user in our DB
+    # We use a dummy password for OAuth users
+    try:
+        register_user(name, email, "github_oauth_dummy_pass")
+    except:
+        pass # User likely already exists
+
+    # Generate our app's JWT token
+    auth_data = login_user(email, "github_oauth_dummy_pass")
+    token = auth_data.get("access_token")
+
+    # 4. Redirect back to React with the token in the URL
+    return RedirectResponse(
+        url=f"http://localhost:5173/oauth-success?token={token}"
+    )
