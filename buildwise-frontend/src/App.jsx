@@ -17,6 +17,9 @@ const Dashboard = () => {
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [scanPath, setScanPath] = useState("");
+  const [isScanning, setIsScanning] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   // --- HELPERS ---
   const getSeverityColor = (severity) => {
@@ -80,40 +83,56 @@ const Dashboard = () => {
   // Keep your project fetching in a separate function to stay organized
   const fetchProjects = () => {
     const token = localStorage.getItem("token");
+    console.log("🔄 Fetching projects for user...");
     fetch("http://127.0.0.1:8000/projects", {
       headers: { "Authorization": `Bearer ${token}` }
     })
-      .then((res) => res.json())
+      .then((res) => {
+        console.log("📡 Projects API response status:", res.status);
+        return res.json();
+      })
       .then((data) => {
+        console.log("📋 Projects data received:", data);
         setProjects(Array.isArray(data) ? data : []);
       })
-      .catch((err) => console.error("Project Fetch Error:", err));
+      .catch((err) => {
+        console.error("❌ Project Fetch Error:", err);
+      });
   };
 
   // 2. Fetch Scans for a Project
   const fetchScans = (projectId) => {
     const token = localStorage.getItem("token");
+    console.log(`📂 Fetching scans for project_id: ${projectId}`);
 
     fetch(`http://127.0.0.1:8000/projects/${projectId}/scans`, {
       headers: {
         "Authorization": `Bearer ${token}`
       }
     })
-      .then((res) => res.json())
+      .then((res) => {
+        console.log("📡 Scans API status:", res.status);
+        return res.json();
+      })
       .then((data) => {
+        console.log("📋 Scans data received:", data);
         setScans(Array.isArray(data) ? data : []);
         setSelectedScan(null);
         setIssues([]);
         setSelectedIssue(null);
         setAiSuggestions([]);
       })
-      .catch((err) => console.error("Error fetching scans:", err));
+      .catch((err) => console.error("❌ Error fetching scans:", err));
   };
 
   // 3. Fetch AI Suggestions (POST)
   const fetchAISuggestions = (currentIssues) => {
-    if (!selectedProject || currentIssues.length === 0) return;
+    if (!selectedProject || currentIssues.length === 0) {
+      console.log("⏭️ Skipping AI suggestions: no project or issues");
+      return;
+    }
     const token = localStorage.getItem("token");
+    console.log(`🤖 Fetching AI suggestions for project: ${selectedProject.name}`);
     setIsAiLoading(true);
 
     fetch("http://127.0.0.1:8000/ai/suggestions", {
@@ -127,13 +146,17 @@ const Dashboard = () => {
         issues: currentIssues,
       }),
     })
-      .then((res) => res.json())
+      .then((res) => {
+        console.log("📡 AI suggestions API status:", res.status);
+        return res.json();
+      })
       .then((data) => {
+        console.log("💡 AI suggestions data:", data);
         setAiSuggestions(data.suggestions || []);
         setIsAiLoading(false);
       })
       .catch((err) => {
-        console.error("AI Error:", err);
+        console.error("❌ AI Error:", err);
         setIsAiLoading(false);
       });
   };
@@ -141,29 +164,41 @@ const Dashboard = () => {
   // 4. Fetch Issues for a Scan
   const fetchIssues = (scanId) => {
     const token = localStorage.getItem("token");
+    console.log(`📋 Fetching issues for scan_id: ${scanId}`);
 
     fetch(`http://127.0.0.1:8000/scans/${scanId}/issues`, {
       headers: { "Authorization": `Bearer ${token}` }
     })
-      .then((res) => res.json())
+      .then((res) => {
+        console.log("📡 Issues API status:", res.status);
+        return res.json();
+      })
       .then((data) => {
+        console.log("📋 Issues data received:", data);
         setIssues(Array.isArray(data) ? data : []); 
         setSelectedIssue(null);
         setTimeout(() => fetchAISuggestions(data), 300);
       })
-      .catch((err) => console.error("Error fetching issues:", err));
+      .catch((err) => console.error("❌ Error fetching issues:", err));
   };
 
   // 5. Fetch Specific Issue Detail
   const fetchIssueDetail = (issueId) => {
     const token = localStorage.getItem("token");
+    console.log(`🔍 Fetching issue detail for issue_id: ${issueId}`);
 
     fetch(`http://127.0.0.1:8000/issues/${issueId}`, {
       headers: { "Authorization": `Bearer ${token}` }
     })
-      .then((res) => res.json())
-      .then((data) => setSelectedIssue(data))
-      .catch((err) => console.error("Error fetching detail:", err));
+      .then((res) => {
+        console.log("📡 Issue detail API status:", res.status);
+        return res.json();
+      })
+      .then((data) => {
+        console.log("📋 Issue detail data:", data);
+        setSelectedIssue(data);
+      })
+      .catch((err) => console.error("❌ Error fetching issue detail:", err));
   };
 
   // 6. Update Issue Status (PUT)
@@ -186,33 +221,65 @@ const Dashboard = () => {
       .catch((err) => console.error("Error updating status:", err));
   };
 
-  const handleStartScan = (repoUrl) => {
-  const token = localStorage.getItem("token");
+  const handleStartScan = async () => {
+  if (!scanPath) return alert("Please enter a URL or Path");
   
-  // 1. Extract a project name from the URL (Simple logic)
-  const projectName = repoUrl.split('/').pop() || "New Project";
+  const token = localStorage.getItem("token");
+  const projectName = scanPath.split('/').pop() || "New Project";
 
-  // 2. Alert user that scan started (You can add a loader later)
-  console.log("Starting scan for:", repoUrl);
+  console.log("🚀 Starting scan for:", scanPath, "projectName:", projectName);
 
-  fetch("http://127.0.0.1:8000/scan", {
-    method: "POST",
-    headers: { 
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}` 
-    },
-    body: JSON.stringify({
-      repo_url: repoUrl,
-      project_name: projectName
-    }),
-  })
-    .then((res) => res.json())
-    .then((data) => {
-      alert("Scan Submitted Successfully!");
-      // 3. Refresh projects list so the new project appears
-      fetchProjects(); 
-    })
-    .catch((err) => console.error("Scan Error:", err));
+  // 1. Reset and Start Loading
+  setIsScanning(true);
+  setProgress(10); // Initial kick-off
+
+  // 2. Fake Progress Intervals (Simulating backend work)
+  const timer1 = setTimeout(() => setProgress(30), 800);  // "Reading Files..."
+  const timer2 = setTimeout(() => setProgress(60), 2000); // "Running Security Checks..."
+  const timer3 = setTimeout(() => setProgress(90), 3500); // "Finalizing Report..."
+
+  try {
+    console.log("📡 Sending scan request to backend...");
+    const response = await fetch("http://127.0.0.1:8000/scan", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        repo_url: scanPath,
+        project_name: projectName,
+      }),
+    });
+
+    console.log("📡 Scan API response status:", response.status);
+    const responseData = await response.json();
+    console.log("📋 Scan response data:", responseData);
+
+    if (response.ok) {
+      setProgress(100); // 🎯 Jump to finish
+      setTimeout(() => {
+        setScanPath("");
+        console.log("🔄 Refreshing projects after scan...");
+        fetchProjects();
+        alert("Scan Completed Successfully!");
+        setIsScanning(false);
+        setProgress(0); // Reset for next time
+      }, 500);
+    } else {
+      throw new Error(`Scan failed: ${responseData.detail || 'Unknown error'}`);
+    }
+  } catch (err) {
+    console.error("❌ Scan Error:", err);
+    alert(`Scan failed: ${err.message}`);
+    setIsScanning(false);
+    setProgress(0);
+  } finally {
+    // Clear timers if the request finishes early or fails
+    clearTimeout(timer1);
+    clearTimeout(timer2);
+    clearTimeout(timer3);
+  }
 };
 
   return (
@@ -258,25 +325,51 @@ const Dashboard = () => {
   <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
     <div>
       <h2 className="text-xl font-black text-gray-800">New Security Scan</h2>
-      <p className="text-sm text-gray-500">Analyze a repository for vulnerabilities & AI fixes.</p>
+      <p className="text-sm text-gray-500">Analyze a repository for vulnerabilities.</p>
     </div>
     
     <div className="flex flex-1 max-w-2xl gap-3">
       <input
         type="text"
-        placeholder="Enter GitHub Repo URL (e.g. https://github.com/user/repo)"
+        value={scanPath}
+        onChange={(e) => setScanPath(e.target.value)} // ✅ Controlled Input
+        placeholder="Enter GitHub Repo URL"
         className="flex-1 p-3 border-2 border-gray-100 rounded-xl focus:border-blue-500 outline-none transition-all text-sm"
-        id="repo-input"
+        disabled={isScanning} // Disable while scanning
       />
       <button 
-        onClick={() => {
-          const url = document.getElementById('repo-input').value;
-          if(url) handleStartScan(url);
-        }}
-        className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-100 transition-all whitespace-nowrap"
+        onClick={handleStartScan}
+        disabled={isScanning}
+        className={`px-8 py-3 font-bold rounded-xl shadow-lg transition-all whitespace-nowrap text-white ${
+          isScanning ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 shadow-blue-100"
+        }`}
       >
-        🚀 Start Scan
+        {isScanning ? "⏳ Scanning..." : "🚀 Start Scan"}
       </button>
+      {isScanning && (
+  <div className="mt-6 p-5 bg-blue-50 rounded-2xl border border-blue-100 animate-pulse">
+    <div className="flex justify-between items-center mb-2">
+      <span className="text-sm font-bold text-blue-700">
+        {progress < 40 ? "📂 Reading Repository..." : 
+         progress < 80 ? "🔍 Analyzing Security..." : 
+         "🤖 Generating AI Suggestions..."}
+      </span>
+      <span className="text-sm font-black text-blue-700">{progress}%</span>
+    </div>
+    
+    {/* Progress Bar Container */}
+    <div className="w-full bg-blue-100 h-3 rounded-full overflow-hidden">
+      <div
+        className="bg-blue-600 h-full transition-all duration-500 ease-out"
+        style={{ width: `${progress}%` }}
+      ></div>
+    </div>
+    
+    <p className="text-xs text-blue-500 mt-2">
+      Please do not refresh the page while the architect is reviewing your code.
+    </p>
+  </div>
+)}
     </div>
   </div>
 </section>
@@ -385,17 +478,52 @@ const Dashboard = () => {
               <section className="p-8 bg-white rounded-3xl shadow-2xl border border-gray-100">
                 <h2 className="text-xl font-black mb-6">Issue Analysis</h2>
                 <div className="space-y-6">
+                  {/* File Location Banner */}
+                  <div className="bg-blue-50 p-5 rounded-2xl border-2 border-blue-300 overflow-hidden">
+                    <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-2">📁 Issue Location</p>
+                    <div className="bg-white p-3 rounded-lg font-mono text-sm text-gray-900 border border-blue-100">
+                      <p className="font-bold text-blue-700 break-all">{selectedIssue.file}</p>
+                      {selectedIssue.line && (
+                        <p className="text-gray-600 text-xs mt-2">Line: <span className="font-bold text-red-600">{selectedIssue.line}</span></p>
+                      )}
+                      {selectedIssue.type && (
+                        <p className="text-gray-600 text-xs mt-1">Type: <span className="font-bold">{selectedIssue.type}</span></p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Issue Title */}
+                  <div className="bg-yellow-50 p-5 rounded-2xl border border-yellow-200">
+                    <p className="text-[10px] font-black text-yellow-600 uppercase">Issue</p>
+                    <p className="text-yellow-900 font-bold text-lg mt-2">{selectedIssue.title}</p>
+                  </div>
+
+                  {/* The Problem */}
                   <div className="bg-red-50 p-5 rounded-2xl border border-red-100">
                     <p className="text-[10px] font-black text-red-400 uppercase">The Problem</p>
                     <p className="text-red-900 font-medium">{selectedIssue.why}</p>
                   </div>
+
+                  {/* Fix */}
                   <div className="bg-green-50 p-5 rounded-2xl border border-green-100">
-                    <p className="text-[10px] font-black text-green-400 uppercase">Fix</p>
+                    <p className="text-[10px] font-black text-green-400 uppercase">How to Fix</p>
                     <p className="text-green-900 font-medium">{selectedIssue.fix}</p>
                   </div>
-                  <div className="pt-8 flex gap-4">
-                    <button onClick={() => updateIssueStatus(selectedIssue.id, "FIXED")} className="flex-1 px-4 py-4 bg-blue-600 text-white font-black rounded-2xl text-xs tracking-widest">Mark Fixed</button>
-                    <button onClick={() => updateIssueStatus(selectedIssue.id, "IGNORED")} className="flex-1 px-4 py-4 bg-gray-100 text-gray-500 font-black rounded-2xl text-xs tracking-widest">Ignore</button>
+
+                  {/* Severity Badge */}
+                  <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-2xl">
+                    <span className={`px-4 py-2 rounded-lg font-bold text-xs ${getSeverityColor(selectedIssue.severity)} ${selectedIssue.severity === 'HIGH' ? 'bg-red-100' : selectedIssue.severity === 'MEDIUM' ? 'bg-yellow-100' : 'bg-green-100'}`}>
+                      {selectedIssue.severity} SEVERITY
+                    </span>
+                    <span className={`px-4 py-2 rounded-lg font-bold text-xs ${getStatusBadge(selectedIssue.status)}`}>
+                      {selectedIssue.status}
+                    </span>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="pt-4 flex gap-4">
+                    <button onClick={() => updateIssueStatus(selectedIssue.id, "FIXED")} className="flex-1 px-4 py-4 bg-blue-600 text-white font-black rounded-2xl text-xs tracking-widest hover:bg-blue-700">✅ Mark Fixed</button>
+                    <button onClick={() => updateIssueStatus(selectedIssue.id, "IGNORED")} className="flex-1 px-4 py-4 bg-gray-100 text-gray-600 font-black rounded-2xl text-xs tracking-widest hover:bg-gray-200">⊗ Ignore</button>
                   </div>
                 </div>
               </section>

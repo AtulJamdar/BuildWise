@@ -26,65 +26,58 @@ def get_structure(path):
 
     return "\n".join(structure)
 
-def scan_project(path, repo_name=None):
-    """Main function to scan files, check rules, and get AI feedback."""
-    print(f"\nScanning project: {path}\n")
+
+def scan_project(path, project_name, user_id, repo_url=None):
+    """
+    Main function to scan files, check rules, and save to DB.
+    Updated to handle web-based execution with user_id.
+    """
+    print(f"🔍 Starting scan for {project_name} (User: {user_id})")
+    print(f"📂 Path: {path}")
 
     total_files = 0
     file_types = set()
-    ignore_folders = {'.git', 'node_modules', '__pycache__', 'venv'}
+    ignore_folders = {'.git', 'node_modules', '__pycache__', 'venv', 'target', 'dist'}
 
     # 1. Basic File Stats
     for root, dirs, files in os.walk(path):
         dirs[:] = [d for d in dirs if d not in ignore_folders]
         for file in files:
             total_files += 1
-            ext = file.split('.')[-1] if '.' in file else "no-extension"
+            ext = file.split('.')[-1] if '.' in file else "no-ext"
             file_types.add(ext)
 
-    print(f"Total Files: {total_files}")
-    print(f"File Types: {', '.join(file_types)}")
+    print(f"📊 Total Files: {total_files}")
 
     # 2. Run Security/Best Practice Checks
-    print("\n--- Checks ---")
+    print("\n--- Running Security Checks ---")
     results = run_all_checks(path)
     score, summary = generate_report(results)
+    
+    print(f"🔍 Scan Results: Found {len(results)} issues")
+    print(f"📊 Score: {score}, Summary: {summary}")
 
-    # 3. Handle Project Name (Auto-detect or User Input)
-    if repo_name:
-        project_name = repo_name
-        print(f"\nTarget Project: {project_name}")
-    else:
-        project_name = input("\nEnter project name to save report: ")
-
-    # 4. Save to Database
-    save_report(project_name, score, summary, results)
-
-    # 5. Display Results in Terminal
-    print(f"\nProject Score: {score}/100")
-    print("\nSummary:")
-    for key, value in summary.items():
-        print(f"  - {key}: {value}")
-
-    print("\nIssues Found:")
-    if not results:
-        print("  ✅ No issues found")
-    else:
-        # ✅ UPDATED STEP 3: New Output Format
-        for issue in results:
-            print(f"\n[{issue['severity']}] {issue['title']}")
-            print(f"File: {issue['file']}")
-            print(f"Why: {issue['why']}")
-            print(f"Fix: {issue['fix']}")
-
-    # 6. AI Analysis
-    print("\n🤖 Requesting AI Architect Analysis (Groq)...")
+    # 3. Save to Database (CRITICAL: Pass user_id)
+    # This function must be updated in your project_service.py to accept user_id
     try:
-        structure = get_structure(path)
-        ai_result = analyze_project(structure) 
-
-        print("\n--- ✨ AI Analysis & Suggestions ---")
-        print(ai_result)
-        print("-" * 40)
+        from core.report_service import save_report
+        scan_id = save_report(project_name, score, summary, results, user_id, repo_url)
+        print(f"✅ Report saved to database successfully with scan_id: {scan_id}")
     except Exception as e:
-        print(f"\n⚠️ AI analysis skipped or failed: {e}")
+        print(f"❌ Database Save Failed: {e}")
+        raise e
+
+    # 4. AI Analysis (Optional/Background)
+    # You can keep this here, but remember this makes the API response slower.
+    # It's better to call this via the /ai/suggestions endpoint we made earlier.
+    
+    # 5. Return JSON-serializable result for the API
+    return {
+        "status": "success",
+        "project_name": project_name,
+        "score": score,
+        "total_files": total_files,
+        "issues_found": len(results),
+        "summary": summary,
+        "scan_id": scan_id
+    }
