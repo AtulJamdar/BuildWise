@@ -22,6 +22,12 @@ const Dashboard = () => {
   const [scanPath, setScanPath] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [ghRepos, setGhRepos] = useState([]);
+const [isFetchingRepos, setIsFetchingRepos] = useState(false);
+const [showRepoModal, setShowRepoModal] = useState(false);
+
+  // Get username from localStorage
+  const username = localStorage.getItem("username") || "User";
 
   // --- HELPERS ---
   const getSeverityColor = (severity) => {
@@ -32,6 +38,29 @@ const Dashboard = () => {
       default: return "text-gray-500 font-bold";
     }
   };
+
+  const handleFetchRepos = async () => {
+  // 1. You need to store the GITHUB token during OAuth success
+  // Make sure your OAuthSuccess.jsx saves 'gh_token' too!
+  const ghToken = localStorage.getItem("gh_token");
+
+  if (!ghToken) {
+    alert("Please log in with GitHub to use this feature.");
+    return;
+  }
+
+  setIsFetchingRepos(true);
+  try {
+    const res = await fetch(`http://127.0.0.1:8000/github/repos?token=${ghToken}`);
+    const data = await res.json();
+    setGhRepos(data);
+    setShowRepoModal(true);
+  } catch (err) {
+    alert("Failed to fetch repositories.");
+  } finally {
+    setIsFetchingRepos(false);
+  }
+};
 
   const getStatusBadge = (status) => {
     switch (status) {
@@ -311,7 +340,7 @@ const Dashboard = () => {
           <h1 className="text-xl font-bold text-gray-800">Dashboard Overview</h1>
           <div className="flex items-center gap-6">
             <div className="text-right">
-              <p className="text-sm font-bold text-gray-900">Atul Sunil Jamdar</p>
+              <p className="text-sm font-bold text-gray-900">{username}</p>
               <p className="text-[10px] text-green-500 font-bold uppercase">Administrator</p>
             </div>
             <button 
@@ -349,6 +378,51 @@ const Dashboard = () => {
       >
         {isScanning ? "⏳ Scanning..." : "🚀 Start Scan"}
       </button>
+      <div className="flex flex-col gap-4">
+  <div className="flex gap-2">
+    <input 
+      type="text" 
+      value={scanPath} 
+      onChange={(e) => setScanPath(e.target.value)}
+      placeholder="Paste repo URL..."
+      className="flex-1 p-3 border rounded-xl"
+    />
+    <button 
+      onClick={handleFetchRepos}
+      className="bg-gray-100 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-200 font-bold transition-all"
+    >
+      {isFetchingRepos ? "⏳..." : "🐙 Import"}
+    </button>
+  </div>
+
+  {/* REPO SELECTOR LIST */}
+  {showRepoModal && (
+    <div className="mt-2 bg-white border border-gray-100 rounded-2xl shadow-2xl max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-2">
+      <div className="sticky top-0 bg-gray-50 p-3 border-b flex justify-between items-center">
+        <span className="text-xs font-bold text-gray-500 uppercase">Your Repositories</span>
+        <button onClick={() => setShowRepoModal(false)} className="text-gray-400 hover:text-red-500">✕</button>
+      </div>
+      
+      {ghRepos.length === 0 ? (
+        <p className="p-4 text-center text-gray-400">No repositories found.</p>
+      ) : (
+        ghRepos.map((repo, i) => (
+          <div
+            key={i}
+            onClick={() => {
+              setScanPath(repo.url);
+              setShowRepoModal(false);
+            }}
+            className="p-4 hover:bg-blue-50 cursor-pointer border-b border-gray-50 last:border-0 flex flex-col transition-all"
+          >
+            <span className="font-bold text-gray-800">{repo.name}</span>
+            <span className="text-xs text-gray-400">{repo.url}</span>
+          </div>
+        ))
+      )}
+    </div>
+  )}
+</div>
       {isScanning && (
   <div className="mt-6 p-5 bg-blue-50 rounded-2xl border border-blue-100 animate-pulse">
     <div className="flex justify-between items-center mb-2">

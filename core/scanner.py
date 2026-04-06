@@ -2,7 +2,7 @@ import os
 from core.rules_engine import run_all_checks
 from core.report import generate_report
 from core.report_service import save_report
-from core.ai_analysis import analyze_project
+from core.js_analyzer import build_dependency_graph, find_used_files
 
 def get_structure(path):
     """Generates a clean string of the project folder tree."""
@@ -11,73 +11,86 @@ def get_structure(path):
 
     for root, dirs, files in os.walk(path):
         dirs[:] = [d for d in dirs if d not in ignore]
-        
         level = root.replace(path, "").count(os.sep)
         indent = "  " * level
-        
-        folder_name = os.path.basename(root)
-        if not folder_name:
-            folder_name = os.path.basename(os.path.abspath(path))
-            
+        folder_name = os.path.basename(root) or os.path.basename(os.path.abspath(path))
         structure.append(f"{indent}{folder_name}/")
-
         for file in files:
             structure.append(f"{indent}  {file}")
-
     return "\n".join(structure)
-
 
 def scan_project(path, project_name, user_id, repo_url=None):
     """
-    Main function to scan files, check rules, and save to DB.
-    Updated to handle web-based execution with user_id.
+    Enhanced Scanner Engine:
+    1. Security Analysis
+    2. Dead Code Detection
+    3. Scoring & DB Persistence
     """
-    print(f"🔍 Starting scan for {project_name} (User: {user_id})")
-    print(f"📂 Path: {path}")
-
+    print(f"🚀 [SCANNER] Starting analysis for: {project_name}")
+    
+    # --- 🟢 Fix 1: Define scan_id at the top so return doesn't crash ---
+    scan_id = None
     total_files = 0
-    file_types = set()
-    ignore_folders = {'.git', 'node_modules', '__pycache__', 'venv', 'target', 'dist'}
+    ignore_folders = {'.git', 'node_modules', '__pycache__', 'venv', 'target', 'dist', '.vscode'}
 
-    # 1. Basic File Stats
-    for root, dirs, files in os.walk(path):
-        dirs[:] = [d for d in dirs if d not in ignore_folders]
-        for file in files:
-            total_files += 1
-            ext = file.split('.')[-1] if '.' in file else "no-ext"
-            file_types.add(ext)
-
-    print(f"📊 Total Files: {total_files}")
-
-    # 2. Run Security/Best Practice Checks
-    print("\n--- Running Security Checks ---")
-    results = run_all_checks(path)
-    score, summary = generate_report(results)
-    
-    print(f"🔍 Scan Results: Found {len(results)} issues")
-    print(f"📊 Score: {score}, Summary: {summary}")
-
-    # 3. Save to Database (CRITICAL: Pass user_id)
-    # This function must be updated in your project_service.py to accept user_id
     try:
-        from core.report_service import save_report
-        scan_id = save_report(project_name, score, summary, results, user_id, repo_url)
-        print(f"✅ Report saved to database successfully with scan_id: {scan_id}")
-    except Exception as e:
-        print(f"❌ Database Save Failed: {e}")
-        raise e
+        # --- 1. Basic Statistics ---
+        for root, dirs, files in os.walk(path):
+            dirs[:] = [d for d in dirs if d not in ignore_folders]
+            total_files += len(files)
 
-    # 4. AI Analysis (Optional/Background)
-    # You can keep this here, but remember this makes the API response slower.
-    # It's better to call this via the /ai/suggestions endpoint we made earlier.
-    
-    # 5. Return JSON-serializable result for the API
-    return {
-        "status": "success",
-        "project_name": project_name,
-        "score": score,
-        "total_files": total_files,
-        "issues_found": len(results),
-        "summary": summary,
-        "scan_id": scan_id
-    }
+        # --- 2. Run Security Logic ---
+        results = run_all_checks(path)
+        
+        # --- 3. Dead Code Detection ---
+        print("🕸️  Building Dependency Graph...")
+        try:
+            graph, js_files = build_dependency_graph(path)
+            used_files = find_used_files(graph)
+
+            for file in js_files:
+                file_name = os.path.basename(file)
+                if not any(file_name in imp for imp in used_files):
+                    entry_points = ["App.js", "App.jsx", "main.js", "main.jsx", "index.js"]
+                    if file_name not in entry_points:
+                        results.append({
+                            "title": "Possibly Unused File (Dead Code)",
+                            "file": file,
+                            "severity": "LOW",
+                            "line": 0,
+                            "type": "Architecture",
+                            "why": f"The file '{file_name}' is not imported by any other file.",
+                            "fix": "Check if this file is still needed. If not, delete it."
+                        })
+        except Exception as e:
+            print(f"⚠️ [ANALYZER SKIP] {e}")
+
+        # --- 4. Generate Score ---
+        score, summary = generate_report(results)
+        print(f"🔍 [RESULTS] Found {len(results)} total items. Score: {score}/100")
+
+        # --- 5. Save to Database ---
+        try:
+            # Note: Ensure save_report is imported from core.report_service
+            scan_id = save_report(project_name, score, summary, results, user_id, repo_url)
+            print(f"✅ [DATABASE] Report saved. ID: {scan_id}")
+        except Exception as db_error:
+            print(f"❌ [DATABASE ERROR] {db_error}")
+
+        return {
+            "status": "success",
+            "project_name": project_name,
+            "score": score,
+            "total_files": total_files,
+            "issues_found": len(results),
+            "summary": summary,
+            "scan_id": scan_id
+        }
+
+    except Exception as scan_error:
+        print(f"🔥 [CRITICAL ERROR] {scan_error}")
+        return {
+            "status": "failed",
+            "error": str(scan_error),
+            "project_name": project_name
+        }

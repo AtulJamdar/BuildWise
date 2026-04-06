@@ -7,24 +7,25 @@ from utils.auth import hash_password, verify_password, create_access_token
 # --- 🧠 AUTHENTICATION LOGIC ---
 
 def register_user(username, email, password, role="user"):
-    """
-    Registers a new user with a hashed password and initializes onboarding as False.
-    """
     hashed_pw = hash_password(password)
     conn = get_connection()
     cur = conn.cursor()
 
     try:
-        # ✅ Added onboarding_done=FALSE to the initial registration
+        # 🟢 Changed "role_type" to "role" to match your DB constraint
         cur.execute(
-            "INSERT INTO users (username, email, password, role, onboarding_done) VALUES (%s, %s, %s, %s, FALSE)",
+            """
+            INSERT INTO users (username, email, password, role, onboarding_done) 
+            VALUES (%s, %s, %s, %s, FALSE)
+            """,
             (username, email, hashed_pw, role)
         )
         conn.commit()
         return {"success": True, "message": "User registered successfully"}
     except Exception as e:
-        print(f"Registration Error: {e}")
-        return {"success": False, "message": "Email already exists or database error"}
+        # It's better to print the real error 'e' to the console for debugging
+        print(f"Registration Error: {e}") 
+        return {"success": False, "message": "Registration failed. Check logs."}
     finally:
         cur.close()
         conn.close()

@@ -44,7 +44,7 @@ def register(data: dict = Body(...)):
     if not name or not email or not password:
         raise HTTPException(status_code=400, detail="Missing fields")
     
-    result = register_user(name, email, password)
+    result = register_user(username=name, email=email, password=password)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message"))
     return {"message": "User registered successfully"}
@@ -426,7 +426,7 @@ def github_callback(code: str):
     client_id = os.getenv("GITHUB_CLIENT_ID")
     client_secret = os.getenv("GITHUB_CLIENT_SECRET")
 
-    # 1. Exchange code for Access Token
+    # 1. Exchange code for GitHub Access Token
     token_res = requests.post(
         "https://github.com/login/oauth/access_token",
         headers={"Accept": "application/json"},
@@ -438,6 +438,9 @@ def github_callback(code: str):
     )
     access_token = token_res.json().get("access_token")
 
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Failed to retrieve access token from GitHub")
+
     # 2. Get User Info from GitHub API
     user_res = requests.get(
         "https://api.github.com/user",
@@ -446,21 +449,57 @@ def github_callback(code: str):
     user_data = user_res.json()
 
     # Handle cases where email might be private
-    email = user_data.get("email") or f"{user_data['login']}@github.com"
+    email = user_data.get("email") or f"{user_data.get('login')}@github.com"
     name = user_data.get("name") or user_data.get("login")
 
     # 3. Register or Login the user in our DB
-    # We use a dummy password for OAuth users
+    # We wrap registration in a try/except to ignore "User already exists" errors
     try:
         register_user(name, email, "github_oauth_dummy_pass")
-    except:
-        pass # User likely already exists
+    except Exception as e:
+        print(f"User check: {name} is already in the database.")
 
-    # Generate our app's JWT token
+    # 4. Generate our BUILDWISE app JWT token
     auth_data = login_user(email, "github_oauth_dummy_pass")
-    token = auth_data.get("access_token")
+    
+    # FIX: Define app_token correctly from the auth_data dictionary
+    if auth_data and "access_token" in auth_data:
+        app_token = auth_data.get("access_token")
+    else:
+        # Fallback if login fails
+        return RedirectResponse(url="http://localhost:5173/login?error=auth_failed")
 
-    # 4. Redirect back to React with the token in the URL
+    # 5. Redirect back to React with BOTH tokens
+    # app_token = Our internal JWT for BuildWise API
+    # access_token = The GitHub token for fetching Repos later
     return RedirectResponse(
-        url=f"http://localhost:5173/oauth-success?token={token}"
+        url=f"http://localhost:5173/oauth-success?token={app_token}&gh_token={access_token}"
     )
+
+@app.get("/github/repos")
+def get_github_repos(token: str):
+    """
+    Fetches the list of repositories for the authenticated GitHub user.
+    """
+    # Note: 'token' here is the GITHUB access token, not our app JWT
+    headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+    
+    try:
+        # Fetch up to 100 recent repos
+        response = requests.get(
+            "https://api.github.com/user/repos?sort=updated&per_page=100", 
+            headers=headers
+        )
+        
+        if response.status_code != 200:
+            return []
+
+        repos = response.json()
+        # Clean the data to only send what the frontend needs
+        return [
+            {"name": r["full_name"], "url": r["clone_url"]} 
+            for r in repos
+        ]
+    except Exception as e:
+        print(f"❌ GitHub API Error: {e}")
+        return []
