@@ -7,7 +7,13 @@ def run_all_checks(path):
     results.extend(file_checks.check_large_files(path))
     results.extend(file_checks.check_file_naming(path))
     results.extend(file_checks.check_empty_folders(path))
+    results.extend(file_checks.check_empty_files(path))
     results.extend(file_checks.check_duplicate_files(path))
+    results.extend(file_checks.check_repeated_code(path))
+    results.extend(file_checks.check_api_keys(path))
+    results.extend(file_checks.check_entropy_strings(path))
+    results.extend(file_checks.check_js_ast_secrets(path))
+    results.extend(file_checks.check_hardcoded_links(path))
     results.extend(file_checks.check_unused_files(path))
 
     return results
