@@ -2,6 +2,8 @@ import os
 import shutil
 import stat
 import time
+import tempfile
+from urllib.parse import quote_plus
 from git import Repo
 from core.scanner import scan_project
 
@@ -10,37 +12,32 @@ def remove_readonly(func, path, excinfo):
     os.chmod(path, stat.S_IWRITE)
     func(path)
 
-def scan_github_repo(repo_url, user_id):
+def scan_github_repo(repo_url, user_id, gh_token=None):
     """
     Clones a GitHub repository to a temporary folder, 
     runs the scanner, and then cleans up.
     """
     print(f"🚀 Starting GitHub scan for {repo_url}, user_id: {user_id}")
     
-    # 1. Create a truly unique temp directory to avoid "Folder in use" errors
-    unique_suffix = int(time.time())
-    temp_dir = f"temp_repo_{user_id}_{unique_suffix}"
-
-    # Clean up if the folder somehow exists
-    if os.path.exists(temp_dir):
-        try:
-            shutil.rmtree(temp_dir, onexc=remove_readonly)
-            print(f"🧹 Cleaned up existing temp dir: {temp_dir}")
-        except:
-            shutil.rmtree(temp_dir, onerror=remove_readonly)
+    temp_dir = tempfile.mkdtemp(prefix=f"temp_repo_{user_id}_")
 
     try:
-        # 2. Extract Project Name
+        # 1. Extract Project Name
         suggested_name = repo_url.split("/")[-1].replace(".git", "")
         print(f"📁 Project name: {suggested_name}")
         
-        # 3. Clone the Repository
-        print(f"🔄 Cloning repository from {repo_url} to {temp_dir}")
-        Repo.clone_from(repo_url, temp_dir)
+        # 2. Clone the Repository
+        clone_url = repo_url
+        if gh_token and repo_url.startswith("https://"):
+            safe_token = quote_plus(gh_token)
+            clone_url = repo_url.replace("https://", f"https://{safe_token}@")
+            print("🔐 Using GitHub token for private repo clone")
+
+        print(f"🔄 Cloning repository from {clone_url} to {temp_dir}")
+        Repo.clone_from(clone_url, temp_dir)
         print(f"✅ Clone complete. Starting scan for User ID: {user_id}")
 
-        # 4. Trigger the actual scan logic
-        # This passes the user_id to ensure it saves to the correct database account
+        # 3. Trigger the actual scan logic
         scan_result = scan_project(temp_dir, suggested_name, user_id, repo_url)
         print(f"📊 Scan result: {scan_result}")
 

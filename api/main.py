@@ -386,7 +386,8 @@ def update_profile(
 @app.post("/scan")
 async def run_security_scan(data: dict = Body(...), user_id: int = Depends(get_current_user)):
     repo_url = data.get("repo_url")
-    
+    gh_token = data.get("gh_token")
+
     if not repo_url:
         raise HTTPException(status_code=400, detail="Repository URL is required")
 
@@ -396,8 +397,7 @@ async def run_security_scan(data: dict = Body(...), user_id: int = Depends(get_c
         # 🌐 If it's a GitHub link, use the cloning logic
         if "github.com" in repo_url:
             print(f"🌍 Detected GitHub URL. Cloning and Scanning...")
-            # Note: We need to update this function to accept user_id
-            result = scan_github_repo(repo_url, user_id) 
+            result = scan_github_repo(repo_url, user_id, gh_token)
         else:
             # 📂 Otherwise, treat as local path
             from core.scanner import scan_project
@@ -417,8 +417,8 @@ async def run_security_scan(data: dict = Body(...), user_id: int = Depends(get_c
 @app.get("/auth/github")
 def github_login():
     client_id = os.getenv("GITHUB_CLIENT_ID")
-    # This URL sends the user to GitHub's consent screen
-    url = f"https://github.com/login/oauth/authorize?client_id={client_id}&scope=user:email"
+    # Request access to repo scope so private repositories can be listed and cloned
+    url = f"https://github.com/login/oauth/authorize?client_id={client_id}&scope=repo%20user:email"
     return {"url": url}
 
 @app.get("/auth/github/callback")
@@ -497,7 +497,11 @@ def get_github_repos(token: str):
         repos = response.json()
         # Clean the data to only send what the frontend needs
         return [
-            {"name": r["full_name"], "url": r["clone_url"]} 
+            {
+                "name": r["full_name"],
+                "url": r["clone_url"],
+                "private": r.get("private", False),
+            }
             for r in repos
         ]
     except Exception as e:

@@ -15,7 +15,8 @@ const Dashboard = () => {
   const [selectedProject, setSelectedProject] = useState(null);
   const [scans, setScans] = useState([]);
   const [selectedScan, setSelectedScan] = useState(null);
-  const [issues, setIssues] = useState([]);
+  const [groupedIssues, setGroupedIssues] = useState([]);
+  const [expandedFile, setExpandedFile] = useState(null);
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -23,8 +24,9 @@ const Dashboard = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [ghRepos, setGhRepos] = useState([]);
-const [isFetchingRepos, setIsFetchingRepos] = useState(false);
-const [showRepoModal, setShowRepoModal] = useState(false);
+  const [selectedRepo, setSelectedRepo] = useState(null);
+  const [isFetchingRepos, setIsFetchingRepos] = useState(false);
+  const [showRepoModal, setShowRepoModal] = useState(false);
 
   // Get username from localStorage
   const username = localStorage.getItem("username") || "User";
@@ -56,6 +58,7 @@ const [showRepoModal, setShowRepoModal] = useState(false);
     setGhRepos(data);
     setShowRepoModal(true);
   } catch (err) {
+    console.error("Failed to fetch repositories:", err);
     alert("Failed to fetch repositories.");
   } finally {
     setIsFetchingRepos(false);
@@ -69,6 +72,28 @@ const [showRepoModal, setShowRepoModal] = useState(false);
       case "IGNORED": return "bg-gray-200 text-gray-600 border border-gray-300";
       default: return "bg-gray-100 text-gray-500";
     }
+  };
+
+  const severityRank = { HIGH: 3, MEDIUM: 2, LOW: 1, UNKNOWN: 0 };
+
+  const groupIssuesByFile = (issuesList) => {
+    const fileMap = issuesList.reduce((acc, issue) => {
+      const fileKey = issue.file || "Unknown file";
+      if (!acc[fileKey]) {
+        acc[fileKey] = {
+          file: fileKey,
+          issues: [],
+          highestSeverity: issue.severity || "UNKNOWN",
+        };
+      }
+      acc[fileKey].issues.push(issue);
+      if (severityRank[issue.severity] > severityRank[acc[fileKey].highestSeverity]) {
+        acc[fileKey].highestSeverity = issue.severity;
+      }
+      return acc;
+    }, {});
+
+    return Object.values(fileMap).sort((a, b) => b.issues.length - a.issues.length);
   };
 
   // --- API FETCH FUNCTIONS ---
@@ -149,7 +174,7 @@ const [showRepoModal, setShowRepoModal] = useState(false);
         console.log("📋 Scans data received:", data);
         setScans(Array.isArray(data) ? data : []);
         setSelectedScan(null);
-        setIssues([]);
+        setGroupedIssues([]);
         setSelectedIssue(null);
         setAiSuggestions([]);
       })
@@ -206,9 +231,11 @@ const [showRepoModal, setShowRepoModal] = useState(false);
       })
       .then((data) => {
         console.log("📋 Issues data received:", data);
-        setIssues(Array.isArray(data) ? data : []); 
+        const issuesArray = Array.isArray(data) ? data : [];
+        setGroupedIssues(groupIssuesByFile(issuesArray));
         setSelectedIssue(null);
-        setTimeout(() => fetchAISuggestions(data), 300);
+        setExpandedFile(null);
+        setTimeout(() => fetchAISuggestions(issuesArray), 300);
       })
       .catch((err) => console.error("❌ Error fetching issues:", err));
   };
@@ -280,6 +307,7 @@ const [showRepoModal, setShowRepoModal] = useState(false);
       body: JSON.stringify({
         repo_url: scanPath,
         project_name: projectName,
+        gh_token: localStorage.getItem("gh_token"),
       }),
     });
 
@@ -364,10 +392,13 @@ const [showRepoModal, setShowRepoModal] = useState(false);
       <input
         type="text"
         value={scanPath}
-        onChange={(e) => setScanPath(e.target.value)} // ✅ Controlled Input
+        onChange={(e) => {
+          setScanPath(e.target.value);
+          setSelectedRepo(null);
+        }}
         placeholder="Enter GitHub Repo URL"
         className="flex-1 p-3 border-2 border-gray-100 rounded-xl focus:border-blue-500 outline-none transition-all text-sm"
-        disabled={isScanning} // Disable while scanning
+        disabled={isScanning}
       />
       <button 
         onClick={handleStartScan}
@@ -378,51 +409,54 @@ const [showRepoModal, setShowRepoModal] = useState(false);
       >
         {isScanning ? "⏳ Scanning..." : "🚀 Start Scan"}
       </button>
-      <div className="flex flex-col gap-4">
-  <div className="flex gap-2">
-    <input 
-      type="text" 
-      value={scanPath} 
-      onChange={(e) => setScanPath(e.target.value)}
-      placeholder="Paste repo URL..."
-      className="flex-1 p-3 border rounded-xl"
-    />
-    <button 
-      onClick={handleFetchRepos}
-      className="bg-gray-100 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-200 font-bold transition-all"
-    >
-      {isFetchingRepos ? "⏳..." : "🐙 Import"}
-    </button>
-  </div>
-
-  {/* REPO SELECTOR LIST */}
-  {showRepoModal && (
-    <div className="mt-2 bg-white border border-gray-100 rounded-2xl shadow-2xl max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-2">
-      <div className="sticky top-0 bg-gray-50 p-3 border-b flex justify-between items-center">
-        <span className="text-xs font-bold text-gray-500 uppercase">Your Repositories</span>
-        <button onClick={() => setShowRepoModal(false)} className="text-gray-400 hover:text-red-500">✕</button>
-      </div>
-      
-      {ghRepos.length === 0 ? (
-        <p className="p-4 text-center text-gray-400">No repositories found.</p>
-      ) : (
-        ghRepos.map((repo, i) => (
-          <div
-            key={i}
-            onClick={() => {
-              setScanPath(repo.url);
-              setShowRepoModal(false);
-            }}
-            className="p-4 hover:bg-blue-50 cursor-pointer border-b border-gray-50 last:border-0 flex flex-col transition-all"
-          >
-            <span className="font-bold text-gray-800">{repo.name}</span>
-            <span className="text-xs text-gray-400">{repo.url}</span>
-          </div>
-        ))
-      )}
+      <button 
+        onClick={handleFetchRepos}
+        disabled={isScanning}
+        className="self-end bg-gray-100 text-gray-700 px-4 py-3 rounded-xl hover:bg-gray-200 font-bold transition-all"
+      >
+        {isFetchingRepos ? "⏳..." : "🐙 Import"}
+      </button>
     </div>
-  )}
-</div>
+    {selectedRepo?.private && (
+      <div className="mt-4 inline-flex items-center gap-2 px-3 py-2 bg-red-100 text-red-700 rounded-xl text-xs font-semibold">
+        <span>Private Scan Mode</span>
+      </div>
+    )}
+
+    {/* REPO SELECTOR LIST */}
+    {showRepoModal && (
+      <div className="mt-4 bg-white border border-gray-100 rounded-2xl shadow-2xl max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-2">
+        <div className="sticky top-0 bg-gray-50 p-3 border-b flex justify-between items-center">
+          <span className="text-xs font-bold text-gray-500 uppercase">Your Repositories</span>
+          <button onClick={() => setShowRepoModal(false)} className="text-gray-400 hover:text-red-500">✕</button>
+        </div>
+        
+        {ghRepos.length === 0 ? (
+          <p className="p-4 text-center text-gray-400">No repositories found.</p>
+        ) : (
+          ghRepos.map((repo, i) => (
+            <div
+              key={i}
+              onClick={() => {
+                setScanPath(repo.url);
+                setSelectedRepo(repo);
+                setShowRepoModal(false);
+              }}
+              className="p-4 hover:bg-blue-50 cursor-pointer border-b border-gray-50 last:border-0 flex flex-col transition-all"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-gray-800">{repo.name}</span>
+                {repo.private && (
+                  <span className="text-xs text-red-500 uppercase tracking-widest">Private</span>
+                )}
+              </div>
+              <span className="text-xs text-gray-400">{repo.url}</span>
+            </div>
+          ))
+        )}
+      </div>
+    )}
+  </div>
       {isScanning && (
   <div className="mt-6 p-5 bg-blue-50 rounded-2xl border border-blue-100 animate-pulse">
     <div className="flex justify-between items-center mb-2">
@@ -447,8 +481,6 @@ const [showRepoModal, setShowRepoModal] = useState(false);
     </p>
   </div>
 )}
-    </div>
-  </div>
 </section>
 
         <div className="p-8 space-y-10">
@@ -519,22 +551,55 @@ const [showRepoModal, setShowRepoModal] = useState(false);
               {selectedScan && (
                 <section className="space-y-4">
                   <h2 className="text-sm font-black text-gray-400 uppercase tracking-widest">Detected Issues</h2>
-                  <div className="space-y-3">
-                    {issues.map((issue) => (
-                      <div
-                        key={issue.id}
-                        onClick={() => fetchIssueDetail(issue.id)}
-                        className={`p-5 bg-white rounded-2xl shadow-sm cursor-pointer transition-all border-2 ${
-                          selectedIssue?.id === issue.id ? "border-blue-500" : "border-transparent"
-                        }`}
-                      >
-                        <div className="flex justify-between items-center">
-                          <h3 className={`text-sm font-bold ${getSeverityColor(issue.severity)}`}>[{issue.severity}] {issue.title}</h3>
-                          <span className={`px-2.5 py-1 text-[10px] font-black rounded-lg uppercase ${getStatusBadge(issue.status)}`}>{issue.status}</span>
+                  <div className="space-y-4">
+                    {groupedIssues.length === 0 ? (
+                      <div className="p-6 bg-gray-50 rounded-3xl text-center text-gray-500">No issues found for this scan.</div>
+                    ) : (
+                      groupedIssues.map((group) => (
+                        <div key={group.file} className="space-y-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setExpandedFile(expandedFile === group.file ? null : group.file);
+                              setSelectedIssue(null);
+                            }}
+                            className={`w-full p-5 bg-white rounded-3xl border-2 text-left transition-all ${
+                              expandedFile === group.file ? "border-blue-500 shadow-sm" : "border-gray-100 hover:border-blue-200"
+                            }`}
+                          >
+                            <div className="flex justify-between items-center gap-4">
+                              <div>
+                                <h3 className="text-sm font-bold text-gray-900">{group.file}</h3>
+                                <p className="text-xs text-gray-500 mt-1">{group.issues.length} issue{group.issues.length > 1 ? "s" : ""} · {group.highestSeverity} highest severity</p>
+                              </div>
+                              <span className="text-blue-600 font-black text-xl">{expandedFile === group.file ? "−" : "+"}</span>
+                            </div>
+                          </button>
+
+                          {expandedFile === group.file && (
+                            <div className="space-y-2 pl-4">
+                              {group.issues.map((issue) => (
+                                <div
+                                  key={issue.id}
+                                  onClick={() => fetchIssueDetail(issue.id)}
+                                  className={`p-4 bg-slate-50 rounded-2xl cursor-pointer transition-all border ${
+                                    selectedIssue?.id === issue.id ? "border-blue-400 bg-blue-50" : "border-transparent hover:border-gray-200"
+                                  }`}
+                                >
+                                  <div className="flex justify-between items-start gap-3">
+                                    <div className="min-w-0">
+                                      <h4 className={`text-sm font-bold ${getSeverityColor(issue.severity)}`}>{issue.title}</h4>
+                                      <p className="text-[10px] text-gray-500 mt-1">Line {issue.line || "N/A"}</p>
+                                    </div>
+                                    <span className={`px-2 py-1 text-[10px] font-black rounded-lg uppercase ${getStatusBadge(issue.status)}`}>{issue.status}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <p className="text-gray-400 mt-2 text-[10px] font-mono truncate bg-gray-50 p-2 rounded-lg">{issue.file}</p>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </section>
               )}
@@ -569,21 +634,21 @@ const [showRepoModal, setShowRepoModal] = useState(false);
                     </div>
                   </div>
 
-                  {/* Issue Title */}
+                  {/* What is the issue */}
                   <div className="bg-yellow-50 p-5 rounded-2xl border border-yellow-200">
-                    <p className="text-[10px] font-black text-yellow-600 uppercase">Issue</p>
+                    <p className="text-[10px] font-black text-yellow-600 uppercase">What is the issue?</p>
                     <p className="text-yellow-900 font-bold text-lg mt-2">{selectedIssue.title}</p>
                   </div>
 
-                  {/* The Problem */}
+                  {/* Why this happens */}
                   <div className="bg-red-50 p-5 rounded-2xl border border-red-100">
-                    <p className="text-[10px] font-black text-red-400 uppercase">The Problem</p>
+                    <p className="text-[10px] font-black text-red-400 uppercase">Why this happens</p>
                     <p className="text-red-900 font-medium">{selectedIssue.why}</p>
                   </div>
 
-                  {/* Fix */}
+                  {/* How to fix */}
                   <div className="bg-green-50 p-5 rounded-2xl border border-green-100">
-                    <p className="text-[10px] font-black text-green-400 uppercase">How to Fix</p>
+                    <p className="text-[10px] font-black text-green-400 uppercase">How to fix</p>
                     <p className="text-green-900 font-medium">{selectedIssue.fix}</p>
                   </div>
 
