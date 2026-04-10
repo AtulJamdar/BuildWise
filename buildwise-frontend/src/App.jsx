@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Onboarding from "./pages/Onboarding";
 import Profile from "./pages/Profile";
+import Plans from "./pages/Plans";
 import OAuthSuccess from "./pages/OAuthSuccess";
 
 // --- DASHBOARD COMPONENT ---
@@ -32,6 +33,13 @@ const Dashboard = () => {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteMessage, setInviteMessage] = useState("");
   const [inviteError, setInviteError] = useState("");
+  const [planInfo, setPlanInfo] = useState(null);
+  const [planError, setPlanError] = useState("");
+  const [usage, setUsage] = useState(null);
+  const [newTeamName, setNewTeamName] = useState("");
+  const [teamMessage, setTeamMessage] = useState("");
+  const [teamError, setTeamError] = useState("");
+  const [isUpgrading, setIsUpgrading] = useState(false);
 
   // Get username from localStorage
   const username = localStorage.getItem("username") || "User";
@@ -58,7 +66,7 @@ const Dashboard = () => {
 
   setIsFetchingRepos(true);
   try {
-    const res = await fetch(`http://127.0.0.1:8000/github/repos?token=${ghToken}`);
+    const res = await fetch(`http://localhost:8000/github/repos?token=${ghToken}`);
     const data = await res.json();
     setGhRepos(data);
     setShowRepoModal(true);
@@ -117,7 +125,7 @@ const Dashboard = () => {
     }
 
     // 2. Check if onboarding is complete
-    fetch("http://127.0.0.1:8000/auth/status", {
+    fetch("http://localhost:8000/auth/status", {
       headers: { 
         "Authorization": `Bearer ${token}` 
       }
@@ -134,6 +142,8 @@ const Dashboard = () => {
           // 👉 Everything is good, load the data
           fetchProjects();
           fetchTeams();
+          fetchPlan();
+          fetchUsage();
         }
       })
       .catch((err) => {
@@ -148,13 +158,86 @@ const Dashboard = () => {
     if (!token) return;
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/teams", {
+      const res = await fetch("http://localhost:8000/teams", {
         headers: { "Authorization": `Bearer ${token}` }
       });
       const data = await res.json();
       setTeams(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error("❌ Team Fetch Error:", err);
+    }
+  };
+
+  const fetchPlan = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      const res = await fetch("http://localhost:8000/plan", {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || "Unable to load plan");
+      }
+      const data = await res.json();
+      setPlanInfo(data);
+    } catch (err) {
+      console.error("❌ Plan Fetch Error:", err);
+      setPlanError(err.message);
+    }
+  };
+
+  const fetchUsage = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      const res = await fetch("http://localhost:8000/user/usage", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || "Unable to load usage");
+      }
+      const data = await res.json();
+      setUsage(data);
+    } catch (err) {
+      console.error("❌ Usage Fetch Error:", err);
+    }
+  };
+
+  const createTeam = async () => {
+    const token = localStorage.getItem("token");
+    setTeamMessage("");
+    setTeamError("");
+
+    if (!newTeamName.trim()) {
+      setTeamError("Enter a team name first.");
+      return;
+    }
+
+    try {
+      const res = await fetch("http://localhost:8000/teams", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ name: newTeamName.trim() }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || "Failed to create team");
+      }
+
+      setNewTeamName("");
+      setTeamMessage("Team created successfully.");
+      await fetchTeams();
+    } catch (err) {
+      console.error("❌ Team Create Error:", err);
+      setTeamError(err.message);
     }
   };
 
@@ -174,7 +257,7 @@ const Dashboard = () => {
     }
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/teams/invite", {
+      const res = await fetch("http://localhost:8000/teams/invite", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -193,18 +276,109 @@ const Dashboard = () => {
 
       setInviteMessage("User invited successfully.");
       setInviteEmail("");
+      await fetchTeams();
     } catch (err) {
       console.error("❌ Invite Error:", err);
       setInviteError(err.message);
     }
   };
 
+  const loadRazorpayScript = () => {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector("#razorpay-script")) {
+        resolve(true);
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.id = "razorpay-script";
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve(true);
+      script.onerror = () => reject(new Error("Razorpay script failed to load"));
+      document.body.appendChild(script);
+    });
+  };
+
+  const handleUpgrade = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      alert("You must be logged in to upgrade.");
+      return;
+    }
+
+    setIsUpgrading(true);
+
+    try {
+      await loadRazorpayScript();
+
+      const orderRes = await fetch("http://localhost:8000/create-order", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const orderData = await orderRes.json();
+      if (!orderRes.ok) {
+        throw new Error(orderData.detail || orderData.error || "Failed to create Razorpay order");
+      }
+
+      const options = {
+        key: orderData.key_id,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: "BuildWise",
+        description: "BuildWise Pro Plan",
+        order_id: orderData.order_id,
+        handler: async function (response) {
+          try {
+            const verifyRes = await fetch("http://localhost:8000/verify-payment", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                order_id: orderData.order_id,
+                payment_id: response.razorpay_payment_id,
+                signature: response.razorpay_signature,
+              }),
+            });
+
+            const verifyData = await verifyRes.json();
+            if (!verifyRes.ok) {
+              throw new Error(verifyData.detail || verifyData.error || "Payment verification failed");
+            }
+
+            alert("Payment successful! Your plan has been upgraded.");
+            fetchPlan();
+          } catch (verifyErr) {
+            console.error("❌ Verify Payment Error:", verifyErr);
+            alert(`Payment verification failed: ${verifyErr.message}`);
+          }
+        },
+        theme: {
+          color: "#2563eb",
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+    } catch (err) {
+      console.error("❌ Upgrade Error:", err);
+      alert(`Upgrade failed: ${err.message}`);
+    } finally {
+      setIsUpgrading(false);
+    }
+  };
+;
+
   const fetchProjects = async (autoSelectProjectName = null) => {
     const token = localStorage.getItem("token");
     console.log("🔄 Fetching projects for user...");
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/projects", {
+      const res = await fetch("http://localhost:8000/projects", {
         headers: { "Authorization": `Bearer ${token}` }
       });
 
@@ -239,7 +413,7 @@ const Dashboard = () => {
     const token = localStorage.getItem("token");
     console.log(`📂 Fetching scans for project_id: ${projectId}`);
 
-    fetch(`http://127.0.0.1:8000/projects/${projectId}/scans`, {
+    fetch(`http://localhost:8000/projects/${projectId}/scans`, {
       headers: {
         "Authorization": `Bearer ${token}`
       }
@@ -269,7 +443,7 @@ const Dashboard = () => {
     console.log(`🤖 Fetching AI suggestions for project: ${selectedProject.name}`);
     setIsAiLoading(true);
 
-    fetch("http://127.0.0.1:8000/ai/suggestions", {
+    fetch("http://localhost:8000/ai/suggestions", {
       method: "POST",
       headers: { 
         "Content-Type": "application/json",
@@ -300,7 +474,7 @@ const Dashboard = () => {
     const token = localStorage.getItem("token");
     console.log(`📋 Fetching issues for scan_id: ${scanId}`);
 
-    fetch(`http://127.0.0.1:8000/scans/${scanId}/issues`, {
+    fetch(`http://localhost:8000/scans/${scanId}/issues`, {
       headers: { "Authorization": `Bearer ${token}` }
     })
       .then((res) => {
@@ -323,7 +497,7 @@ const Dashboard = () => {
     const token = localStorage.getItem("token");
     console.log(`🔍 Fetching issue detail for issue_id: ${issueId}`);
 
-    fetch(`http://127.0.0.1:8000/issues/${issueId}`, {
+    fetch(`http://localhost:8000/issues/${issueId}`, {
       headers: { "Authorization": `Bearer ${token}` }
     })
       .then((res) => {
@@ -341,7 +515,7 @@ const Dashboard = () => {
   const updateIssueStatus = (id, status) => {
     const token = localStorage.getItem("token");
 
-    fetch(`http://127.0.0.1:8000/issues/${id}`, {
+    fetch(`http://localhost:8000/issues/${id}`, {
       method: "PUT",
       headers: { 
         "Content-Type": "application/json",
@@ -375,7 +549,7 @@ const Dashboard = () => {
 
     try {
       console.log("📡 Sending scan request to backend...");
-      const response = await fetch("http://127.0.0.1:8000/scan", {
+      const response = await fetch("http://localhost:8000/scan", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -385,7 +559,7 @@ const Dashboard = () => {
           repo_url: scanPath,
           project_name: projectName,
           gh_token: localStorage.getItem("gh_token"),
-          team_id: selectedTeam || null,
+          team_id: selectedTeam ? Number(selectedTeam) : null,
         }),
       });
 
@@ -432,17 +606,37 @@ const Dashboard = () => {
           <button onClick={() => navigate("/profile")} className="flex items-center w-full text-left px-4 py-3 rounded-xl text-gray-500 hover:bg-gray-50">👤 Profile</button>
           <button className="flex items-center w-full text-left px-4 py-3 rounded-xl text-gray-500 hover:bg-gray-50">⚙️ Settings</button>
         </nav>
-        <div className="p-4 border-t">
+        <div className="p-4 border-t space-y-3">
           <div className="bg-slate-900 rounded-xl p-4 text-white">
             <p className="text-[10px] font-bold opacity-50 uppercase">Current Plan</p>
-            <p className="text-sm font-bold">Developer Pro</p>
+            <p className="text-sm font-bold">{planInfo?.plan?.toUpperCase() || "FREE"}</p>
+            {planInfo?.trial_active && <p className="text-[10px] mt-2 text-blue-200">Trial active</p>}
           </div>
+
+          {usage && (
+            <div
+              onClick={() => navigate("/plans")}
+              className="cursor-pointer rounded-3xl bg-gray-900 p-4 text-white transition hover:bg-gray-800"
+            >
+              <div className="text-sm font-semibold">{usage.plan?.toUpperCase() || "FREE"} PLAN</div>
+              <div className="text-xs mt-1 text-gray-300">{usage.used} / {usage.limit} scans used</div>
+              <div className="w-full bg-gray-700 h-2 rounded-full mt-3 overflow-hidden">
+                <div
+                  className="bg-green-500 h-2 rounded-full transition-all"
+                  style={{ width: `${Math.min(100, (usage.used / Math.max(usage.limit, 1)) * 100)}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
         </div>
       </aside>
 
       <main className="flex-1 flex flex-col h-screen overflow-y-auto">
         <header className="flex justify-between items-center bg-white px-8 py-4 shadow-sm border-b sticky top-0 z-10">
-          <h1 className="text-xl font-bold text-gray-800">Dashboard Overview</h1>
+          <div>
+            <h1 className="text-xl font-bold text-gray-800">Dashboard Overview</h1>
+            <p className="text-sm text-gray-500">Monitor your security scans, plans, and teams in one place.</p>
+          </div>
           <div className="flex items-center gap-6">
             <div className="text-right">
               <p className="text-sm font-bold text-gray-900">{username}</p>
@@ -456,6 +650,69 @@ const Dashboard = () => {
             </button>
           </div>
         </header>
+
+        <section className="p-8 bg-white rounded-3xl shadow-sm border border-blue-100 mb-10 grid gap-6 md:grid-cols-3">
+          <div className="p-6 rounded-3xl bg-slate-50 border border-gray-100">
+            <p className="text-sm uppercase tracking-widest text-gray-500 font-bold">Current Plan</p>
+            <h2 className="mt-3 text-2xl font-black text-gray-900">{planInfo?.plan?.toUpperCase() || "FREE"}</h2>
+            <p className="text-sm text-gray-500 mt-2">{planInfo?.trial_active ? "Trial active" : "Standard plan"}</p>
+            <div className="mt-5">
+              <p className="text-xs uppercase tracking-widest text-gray-400">Usage</p>
+              <div className="mt-2 bg-gray-200 rounded-full h-3 overflow-hidden">
+                <div
+                  className="h-full bg-blue-600"
+                  style={{ width: `${Math.min(100, planInfo?.scan_count / Math.max(planInfo?.scan_limit, 1) * 100)}%` }}
+                />
+              </div>
+              <p className="mt-2 text-sm text-gray-600">{planInfo?.scan_count ?? 0}/{planInfo?.scan_limit ?? 10} scans used</p>
+            </div>
+          </div>
+
+          <div className="p-6 rounded-3xl bg-slate-50 border border-gray-100">
+            <p className="text-sm uppercase tracking-widest text-gray-500 font-bold">Team Membership</p>
+            <h2 className="mt-3 text-2xl font-black text-gray-900">{teams.length}</h2>
+            <p className="text-sm text-gray-500 mt-2">Teams you own or belong to.</p>
+            <ul className="mt-4 space-y-3 text-sm text-gray-700">
+              {teams.slice(0, 3).map((team) => (
+                <li key={team.id} className="flex items-center justify-between gap-2">
+                  <span>{team.name}</span>
+                  <span className="text-xs uppercase tracking-widest text-blue-600 font-bold">{team.role}</span>
+                </li>
+              ))}
+              {teams.length === 0 && <li className="text-gray-500">No teams yet</li>}
+            </ul>
+          </div>
+
+          <div className="p-6 rounded-3xl bg-slate-50 border border-gray-100">
+            <p className="text-sm uppercase tracking-widest text-gray-500 font-bold">Quick Actions</p>
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="block text-xs uppercase tracking-widest text-gray-500 mb-2">Create New Team</label>
+                <input
+                  value={newTeamName}
+                  onChange={(e) => setNewTeamName(e.target.value)}
+                  placeholder="Team name"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm"
+                />
+                <button
+                  onClick={createTeam}
+                  className="mt-3 w-full bg-blue-600 text-white px-4 py-3 rounded-xl text-sm font-bold hover:bg-blue-700"
+                >
+                  Create Team
+                </button>
+                <button
+                  onClick={handleUpgrade}
+                  disabled={planInfo?.plan === "pro" || isUpgrading}
+                  className={`mt-3 w-full px-4 py-3 rounded-xl text-sm font-bold transition-all ${planInfo?.plan === "pro" ? "bg-gray-300 text-gray-700 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+                >
+                  {planInfo?.plan === "pro" ? "Pro Plan Active" : isUpgrading ? "Processing…" : "Upgrade to Pro"}
+                </button>
+                {teamMessage && <p className="mt-2 text-sm text-green-600">{teamMessage}</p>}
+                {teamError && <p className="mt-2 text-sm text-red-600">{teamError}</p>}
+              </div>
+            </div>
+          </div>
+        </section>
 
         {/* --- 🚀 SCAN NEW PROJECT SECTION --- */}
 <section className="p-8 bg-white rounded-3xl shadow-sm border border-blue-100 mb-10">
@@ -804,6 +1061,7 @@ function App() {
         <Route path="/register" element={<Register />} />
         {/* We keep your dashboard on a specific route */}
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/plans" element={<Plans />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/oauth-success" element={<OAuthSuccess />} />
       </Routes>

@@ -12,19 +12,38 @@ export default function OAuthSuccess() {
     const ghToken = params.get("gh_token"); // GitHub's Access Token
 
     if (appToken) {
-      // 2. Save our internal app token (Required for all API calls)
       localStorage.setItem("token", appToken);
 
       if (ghToken) {
-        // 3. Save GitHub token if available (Required for Repo Import)
         localStorage.setItem("gh_token", ghToken);
         console.log("✅ OAuth Success: Both tokens saved.");
-        navigate("/dashboard");
-      } else {
-        // 4. Fallback: If no GitHub token, go to onboarding first
-        console.log("ℹ️ OAuth Success: App token saved, moving to onboarding.");
-        navigate("/onboarding");
       }
+
+      const checkOnboarding = async () => {
+        try {
+          const res = await fetch("http://localhost:8000/user/profile", {
+            headers: {
+              Authorization: `Bearer ${appToken}`,
+            },
+          });
+
+          if (!res.ok) {
+            throw new Error("Failed to fetch user onboarding status");
+          }
+
+          const user = await res.json();
+          if (user.is_onboarded) {
+            navigate("/dashboard");
+          } else {
+            navigate("/onboarding");
+          }
+        } catch (err) {
+          console.error("❌ Onboarding check failed:", err);
+          navigate("/onboarding");
+        }
+      };
+
+      checkOnboarding();
     } else {
       // 5. If no token is found, something went wrong—back to login
       console.log("❌ OAuth Failed: No tokens found in URL.");

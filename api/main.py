@@ -1,6 +1,6 @@
 import os
 import json
-from fastapi import FastAPI, Body, HTTPException, Depends, status
+from fastapi import FastAPI, Body, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from dotenv import load_dotenv
@@ -14,11 +14,36 @@ from core.team_service import create_team, get_user_teams, add_member_to_team, u
 from utils.dependencies import get_current_user
 from core.repo_scanner import scan_github_repo
 import requests
+import razorpay
+import hmac
+import hashlib
+from authlib.integrations.starlette_client import OAuth
+from starlette.config import Config
+from starlette.middleware.sessions import SessionMiddleware
 from fastapi.responses import RedirectResponse
 from datetime import datetime, timezone
 
 load_dotenv()
+config = Config(environ=os.environ)
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+SECRET_KEY = os.getenv("SECRET_KEY", "supersecret")
+razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", f"{BACKEND_URL}/auth/google/callback")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+oauth = OAuth(config)
+oauth.register(
+    name="google",
+    client_id=GOOGLE_CLIENT_ID,
+    client_secret=GOOGLE_CLIENT_SECRET,
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile"},
+)
 
 app = FastAPI(title="BuildWise API")
 
@@ -30,6 +55,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 @app.get("/")
 def home():
@@ -337,7 +364,7 @@ def get_profile(user_id: int = Depends(get_current_user)):
     try:
         cur.execute(
             """
-            SELECT username, email, role_type, experience_level, tech_stack
+            SELECT username, email, role_type, experience_level, tech_stack, onboarding_done
             FROM users
             WHERE id=%s
             """,
@@ -370,10 +397,35 @@ def get_profile(user_id: int = Depends(get_current_user)):
             "plan": plan_row[0] if plan_row else "free",
             "scan_count": plan_row[1] if plan_row else 0,
             "scan_limit": plan_row[2] if plan_row else 10,
-            "trial_ends": str(plan_row[3]) if plan_row and plan_row[3] else None
+            "trial_ends": str(plan_row[3]) if plan_row and plan_row[3] else None,
+            "is_onboarded": bool(user[5]) if len(user) > 5 else False,
         }
     except Exception as e:
         print(f"❌ Error fetching profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/user/profile")
+def get_user_profile(user_id: int = Depends(get_current_user)):
+    from db.connection import get_connection
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            "SELECT onboarding_done FROM users WHERE id = %s",
+            (user_id,)
+        )
+        result = cur.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        return {"is_onboarded": bool(result[0])}
+    except Exception as e:
+        print(f"❌ Error fetching user profile: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
@@ -399,6 +451,33 @@ def get_plan(user_id: int = Depends(get_current_user)):
         "scan_limit": plan_info["scan_limit"],
         "trial_ends": str(plan_info["trial_ends"]) if plan_info["trial_ends"] else None,
         "trial_active": trial_active
+    }
+
+
+@app.get("/user/usage")
+def get_usage(user_id: int = Depends(get_current_user)):
+    from db.connection import get_connection
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT plan, scan_count, scan_limit
+        FROM users
+        WHERE id=%s
+    """, (user_id,))
+
+    user = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "plan": user[0] or "free",
+        "used": user[1] or 0,
+        "limit": user[2] or 0,
     }
 
 
@@ -542,7 +621,108 @@ async def run_security_scan(data: dict = Body(...), user_id: int = Depends(get_c
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/create-order")
+def create_order(user_id: int = Depends(get_current_user)):
+    if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
+        raise HTTPException(status_code=500, detail="Razorpay configuration missing")
+
+    try:
+        order = razorpay_client.order.create({
+            "amount": 99900,
+            "currency": "INR",
+            "payment_capture": 1,
+            "notes": {"user_id": str(user_id)},
+        })
+
+        return {
+            "key_id": RAZORPAY_KEY_ID,
+            "order_id": order["id"],
+            "amount": order["amount"],
+            "currency": order["currency"],
+        }
+
+    except Exception as e:
+        print(f"🔥 Razorpay Order Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/verify-payment")
+def verify_payment(data: dict = Body(...), user_id: int = Depends(get_current_user)):
+    order_id = data.get("order_id")
+    payment_id = data.get("payment_id")
+    signature = data.get("signature")
+
+    if not order_id or not payment_id or not signature:
+        raise HTTPException(status_code=400, detail="Missing payment details")
+
+    if not RAZORPAY_KEY_SECRET:
+        raise HTTPException(status_code=500, detail="Razorpay configuration missing")
+
+    generated_signature = hmac.new(
+        bytes(RAZORPAY_KEY_SECRET, "utf-8"),
+        bytes(f"{order_id}|{payment_id}", "utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+
+    if generated_signature != signature:
+        raise HTTPException(status_code=400, detail="Payment verification failed")
+
+    from db.connection import get_connection
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET plan=%s, scan_limit=%s WHERE id=%s",
+        ("pro", 100, user_id)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {"message": "Payment successful, plan upgraded"}
+
+
 # --- 🐙 GITHUB OAUTH ENDPOINTS ---
+
+@app.get("/auth/google")
+async def google_login(request: Request):
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Google OAuth configuration missing")
+    redirect_uri = GOOGLE_REDIRECT_URI
+    print(f"🔁 Google login redirect_uri: {redirect_uri}")
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+
+@app.get("/auth/google/callback")
+async def google_callback(request: Request):
+    token = await oauth.google.authorize_access_token(request)
+    user = token.get("userinfo")
+
+    if not user:
+        try:
+            user = await oauth.google.parse_id_token(request, token)
+        except Exception as parse_err:
+            print(f"❌ Google ID token parse failed: {parse_err}")
+            raise HTTPException(status_code=400, detail="Unable to parse Google user info")
+
+    email = user.get("email")
+    name = user.get("name") or user.get("email") or "Google User"
+
+    if not email:
+        raise HTTPException(status_code=400, detail="Google did not return an email")
+
+    try:
+        register_user(name, email, "google_user")
+    except Exception:
+        pass
+
+    auth_data = login_user(email, "google_user")
+    if auth_data and "access_token" in auth_data:
+        app_token = auth_data.get("access_token")
+    else:
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=auth_failed")
+
+    return RedirectResponse(url=f"{FRONTEND_URL}/oauth-success?token={app_token}")
+
 
 @app.get("/auth/github")
 def github_login():
@@ -592,18 +772,13 @@ def github_callback(code: str):
     # 4. Generate our BUILDWISE app JWT token
     auth_data = login_user(email, "github_oauth_dummy_pass")
     
-    # FIX: Define app_token correctly from the auth_data dictionary
     if auth_data and "access_token" in auth_data:
         app_token = auth_data.get("access_token")
     else:
-        # Fallback if login fails
-        return RedirectResponse(url="http://localhost:5173/login?error=auth_failed")
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=auth_failed")
 
-    # 5. Redirect back to React with BOTH tokens
-    # app_token = Our internal JWT for BuildWise API
-    # access_token = The GitHub token for fetching Repos later
     return RedirectResponse(
-        url=f"http://localhost:5173/oauth-success?token={app_token}&gh_token={access_token}"
+        url=f"{FRONTEND_URL}/oauth-success?token={app_token}&gh_token={access_token}"
     )
 
 @app.get("/github/repos")

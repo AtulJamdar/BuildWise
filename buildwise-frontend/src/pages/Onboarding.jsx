@@ -20,7 +20,7 @@ export default function Onboarding() {
       return;
     }
 
-    fetch("http://127.0.0.1:8000/auth/status", {
+    fetch("http://localhost:8000/auth/status", {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => res.json())
@@ -36,7 +36,7 @@ export default function Onboarding() {
   const handleSubmit = () => {
     const token = localStorage.getItem("token");
 
-    fetch("http://127.0.0.1:8000/auth/onboarding", {
+    fetch("http://localhost:8000/auth/onboarding", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

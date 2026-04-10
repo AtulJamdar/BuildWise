@@ -21,7 +21,7 @@ export default function Profile() {
     console.log("📋 Fetching user profile...");
     setLoading(true);
     
-    fetch("http://127.0.0.1:8000/profile", {
+    fetch("http://localhost:8000/profile", {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -47,7 +47,7 @@ export default function Profile() {
     console.log("💾 Updating profile with:", profile);
     
     try {
-      const response = await fetch("http://127.0.0.1:8000/profile", {
+      const response = await fetch("http://localhost:8000/profile", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

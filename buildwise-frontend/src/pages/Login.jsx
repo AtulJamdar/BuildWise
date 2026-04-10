@@ -15,7 +15,7 @@ export default function Login() {
     setError(""); // Clear previous errors
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/auth/login", {
+      const response = await fetch("http://localhost:8000/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -47,15 +47,18 @@ export default function Login() {
   };
 
   const handleGitHubLogin = async () => {
-  try {
-    const res = await fetch("http://127.0.0.1:8000/auth/github");
-    const data = await res.json();
-    // Redirect the whole browser window to GitHub
-    window.location.href = data.url;
-  } catch (err) {
-    alert("GitHub Login failed to initialize.");
-  }
-};
+    try {
+      const res = await fetch("http://localhost:8000/auth/github");
+      const data = await res.json();
+      window.location.href = data.url;
+    } catch (err) {
+      alert("GitHub Login failed to initialize.");
+    }
+  };
+
+  const handleGoogleLogin = () => {
+    window.location.href = "http://localhost:8000/auth/google";
+  };
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-gray-100">
@@ -96,11 +99,17 @@ export default function Login() {
           </button>
 
           <button
-  onClick={handleGitHubLogin}
-  className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-xl hover:bg-black transition-all mt-4 font-bold"
->
-  <i className="fab fa-github"></i> Login with GitHub
-</button>
+            onClick={handleGitHubLogin}
+            className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-xl hover:bg-black transition-all mt-4 font-bold"
+          >
+            <i className="fab fa-github"></i> Login with GitHub
+          </button>
+          <button
+            onClick={handleGoogleLogin}
+            className="w-full flex items-center justify-center gap-2 bg-red-500 text-white py-3 rounded-xl hover:bg-red-600 transition-all mt-3 font-bold"
+          >
+            <i className="fab fa-google"></i> Login with Google
+          </button>
         </form>
 
         <p
