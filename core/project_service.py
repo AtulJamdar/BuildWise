@@ -1,24 +1,28 @@
 from db.connection import get_connection
-from utils.session import get_logged_in_user
 
-def get_or_create_project(name, repo_url, user_id):
+
+def get_or_create_project(name, repo_url, user_id, team_id=None):
     conn = get_connection()
     cur = conn.cursor()
     try:
-        # Check if project already exists for THIS user
-        cur.execute(
-            "SELECT id FROM projects WHERE project_name = %s AND user_id = %s", 
-            (name, user_id)
-        )
+        if team_id:
+            cur.execute(
+                "SELECT id FROM projects WHERE project_name = %s AND team_id = %s",
+                (name, team_id)
+            )
+        else:
+            cur.execute(
+                "SELECT id FROM projects WHERE project_name = %s AND user_id = %s",
+                (name, user_id)
+            )
         project = cur.fetchone()
 
         if project:
             return project[0]
 
-        # Create new project linked to user
         cur.execute(
-            "INSERT INTO projects (project_name, repo_url, user_id) VALUES (%s, %s, %s) RETURNING id",
-            (name, repo_url, user_id)
+            "INSERT INTO projects (project_name, repo_url, user_id, team_id) VALUES (%s, %s, %s, %s) RETURNING id",
+            (name, repo_url, user_id, team_id)
         )
         new_id = cur.fetchone()[0]
         conn.commit()
@@ -27,23 +31,25 @@ def get_or_create_project(name, repo_url, user_id):
         cur.close()
         conn.close()
 
+
 def get_user_projects(user_id):
     """
-    Fetches only the projects belonging to the specific logged-in user.
+    Fetches projects owned by the user or shared through teams.
     """
     print(f"🔍 Fetching projects for user_id: {user_id}")
-    
+
     conn = get_connection()
     cur = conn.cursor()
-    
+
     try:
-        # 🔒 SQL FIX: Filter by user_id so users can't see each other's data
         query = """
-            SELECT id, project_name
-            FROM projects 
-            WHERE user_id = %s
+            SELECT DISTINCT p.id, p.project_name, p.team_id, t.name
+            FROM projects p
+            LEFT JOIN teams t ON p.team_id = t.id
+            LEFT JOIN team_members tm ON p.team_id = tm.team_id
+            WHERE p.user_id = %s OR tm.user_id = %s
         """
-        cur.execute(query, (user_id,))
+        cur.execute(query, (user_id, user_id))
         projects = cur.fetchall()
         print(f"📋 Found {len(projects)} projects: {projects}")
         return projects
@@ -54,11 +60,25 @@ def get_user_projects(user_id):
         cur.close()
         conn.close()
 
-def get_project_scans(project_id):
-    from db.connection import get_connection
 
+def get_project_scans(project_id, user_id=None):
     conn = get_connection()
     cur = conn.cursor()
+
+    if user_id is not None:
+        cur.execute(
+            """
+            SELECT p.id
+            FROM projects p
+            LEFT JOIN team_members tm ON p.team_id = tm.team_id
+            WHERE p.id = %s AND (p.user_id = %s OR tm.user_id = %s)
+            """,
+            (project_id, user_id, user_id)
+        )
+        if not cur.fetchone():
+            cur.close()
+            conn.close()
+            return None
 
     cur.execute(
         """
@@ -76,3 +96,66 @@ def get_project_scans(project_id):
     conn.close()
 
     return scans
+
+
+def verify_scan_access(scan_id, user_id):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT 1
+        FROM reports r
+        JOIN projects p ON p.id = r.project_id
+        LEFT JOIN team_members tm ON p.team_id = tm.team_id
+        WHERE r.id = %s AND (p.user_id = %s OR tm.user_id = %s)
+        """,
+        (scan_id, user_id, user_id)
+    )
+
+    result = cur.fetchone() is not None
+    cur.close()
+    conn.close()
+    return result
+
+
+def verify_project_access(project_id, user_id):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT 1
+        FROM projects p
+        LEFT JOIN team_members tm ON p.team_id = tm.team_id
+        WHERE p.id = %s AND (p.user_id = %s OR tm.user_id = %s)
+        """,
+        (project_id, user_id, user_id)
+    )
+
+    result = cur.fetchone() is not None
+    cur.close()
+    conn.close()
+    return result
+
+
+def verify_issue_access(issue_id, user_id):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT 1
+        FROM issues i
+        JOIN reports r ON r.id = i.scan_id
+        JOIN projects p ON p.id = r.project_id
+        LEFT JOIN team_members tm ON p.team_id = tm.team_id
+        WHERE i.id = %s AND (p.user_id = %s OR tm.user_id = %s)
+        """,
+        (issue_id, user_id, user_id)
+    )
+
+    result = cur.fetchone() is not None
+    cur.close()
+    conn.close()
+    return result

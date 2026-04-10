@@ -15,15 +15,14 @@ def register_user(username, email, password, role="user"):
         # 🟢 Changed "role_type" to "role" to match your DB constraint
         cur.execute(
             """
-            INSERT INTO users (username, email, password, role, onboarding_done) 
-            VALUES (%s, %s, %s, %s, FALSE)
+            INSERT INTO users (username, email, password, role, onboarding_done, plan, scan_count, scan_limit)
+            VALUES (%s, %s, %s, %s, FALSE, 'free', 0, 10)
             """,
             (username, email, hashed_pw, role)
         )
         conn.commit()
         return {"success": True, "message": "User registered successfully"}
     except Exception as e:
-        # It's better to print the real error 'e' to the console for debugging
         print(f"Registration Error: {e}") 
         return {"success": False, "message": "Registration failed. Check logs."}
     finally:
@@ -121,6 +120,42 @@ def reset_password(token, new_password):
     except Exception as e:
         print(f"Reset Error: {e}")
         return False
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_user_plan_info(user_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT plan, scan_count, scan_limit, trial_ends FROM users WHERE id = %s",
+            (user_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "plan": row[0] or "free",
+            "scan_count": row[1] or 0,
+            "scan_limit": row[2] or 10,
+            "trial_ends": row[3]
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+def increment_scan_count(user_id, amount=1):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "UPDATE users SET scan_count = scan_count + %s WHERE id = %s",
+            (amount, user_id)
+        )
+        conn.commit()
     finally:
         cur.close()
         conn.close()

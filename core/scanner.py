@@ -6,7 +6,7 @@ from core.js_analyzer import build_dependency_graph, find_used_files, normalize_
 from core.constants import SAFE_FILES, ENTRY_FILES, LOGIC_EXTENSIONS
 
 
-def scan_project(path, project_name, user_id, repo_url=None):
+def scan_project(path, project_name, user_id, repo_url=None, team_id=None):
     print(f"🚀 [SCANNER] Starting deep analysis: {project_name}")
 
     scan_id = None
@@ -90,7 +90,7 @@ def scan_project(path, project_name, user_id, repo_url=None):
 
         # 4. Finalize and Save
         score, summary = generate_report(final_results)
-        scan_id = save_report(project_name, score, summary, final_results, user_id, repo_url)
+        scan_id = save_report(project_name, score, summary, final_results, user_id, repo_url, team_id)
 
         return {
             "status": "success",

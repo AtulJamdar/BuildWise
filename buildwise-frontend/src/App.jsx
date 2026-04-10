@@ -27,6 +27,11 @@ const Dashboard = () => {
   const [selectedRepo, setSelectedRepo] = useState(null);
   const [isFetchingRepos, setIsFetchingRepos] = useState(false);
   const [showRepoModal, setShowRepoModal] = useState(false);
+  const [teams, setTeams] = useState([]);
+  const [selectedTeam, setSelectedTeam] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteMessage, setInviteMessage] = useState("");
+  const [inviteError, setInviteError] = useState("");
 
   // Get username from localStorage
   const username = localStorage.getItem("username") || "User";
@@ -127,7 +132,8 @@ const Dashboard = () => {
           navigate("/onboarding");
         } else {
           // 👉 Everything is good, load the data
-          fetchProjects(); 
+          fetchProjects();
+          fetchTeams();
         }
       })
       .catch((err) => {
@@ -137,23 +143,95 @@ const Dashboard = () => {
   }, [navigate]);
 
   // Keep your project fetching in a separate function to stay organized
-  const fetchProjects = () => {
+  const fetchTeams = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      const res = await fetch("http://127.0.0.1:8000/teams", {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setTeams(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("❌ Team Fetch Error:", err);
+    }
+  };
+
+  const inviteMember = async () => {
+    const token = localStorage.getItem("token");
+    setInviteMessage("");
+    setInviteError("");
+
+    if (!selectedTeam) {
+      setInviteError("Please select a team first.");
+      return;
+    }
+
+    if (!inviteEmail) {
+      setInviteError("Please enter an email to invite.");
+      return;
+    }
+
+    try {
+      const res = await fetch("http://127.0.0.1:8000/teams/invite", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          team_id: selectedTeam,
+          email: inviteEmail,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || "Invite failed");
+      }
+
+      setInviteMessage("User invited successfully.");
+      setInviteEmail("");
+    } catch (err) {
+      console.error("❌ Invite Error:", err);
+      setInviteError(err.message);
+    }
+  };
+
+  const fetchProjects = async (autoSelectProjectName = null) => {
     const token = localStorage.getItem("token");
     console.log("🔄 Fetching projects for user...");
-    fetch("http://127.0.0.1:8000/projects", {
-      headers: { "Authorization": `Bearer ${token}` }
-    })
-      .then((res) => {
-        console.log("📡 Projects API response status:", res.status);
-        return res.json();
-      })
-      .then((data) => {
-        console.log("📋 Projects data received:", data);
-        setProjects(Array.isArray(data) ? data : []);
-      })
-      .catch((err) => {
-        console.error("❌ Project Fetch Error:", err);
+
+    try {
+      const res = await fetch("http://127.0.0.1:8000/projects", {
+        headers: { "Authorization": `Bearer ${token}` }
       });
+
+      console.log("📡 Projects API response status:", res.status);
+      const data = await res.json();
+      console.log("📋 Projects data received:", data);
+
+      const projectsList = Array.isArray(data) ? data : [];
+      setProjects(projectsList);
+
+      if (autoSelectProjectName) {
+        const normalizedName = autoSelectProjectName.replace(/\.git$/i, "");
+        const matched = projectsList.find((project) => project.name === normalizedName);
+        if (matched) {
+          setSelectedProject(matched);
+          fetchScans(matched.id);
+          return;
+        }
+      }
+
+      if (projectsList.length === 1 && !selectedProject) {
+        setSelectedProject(projectsList[0]);
+        fetchScans(projectsList[0].id);
+      }
+    } catch (err) {
+      console.error("❌ Project Fetch Error:", err);
+    }
   };
 
   // 2. Fetch Scans for a Project
@@ -280,66 +358,65 @@ const Dashboard = () => {
   };
 
   const handleStartScan = async () => {
-  if (!scanPath) return alert("Please enter a URL or Path");
-  
-  const token = localStorage.getItem("token");
-  const projectName = scanPath.split('/').pop() || "New Project";
+    if (!scanPath) return alert("Please enter a URL or Path");
 
-  console.log("🚀 Starting scan for:", scanPath, "projectName:", projectName);
+    const token = localStorage.getItem("token");
+    const pathParts = scanPath.split('/').filter(Boolean);
+    const projectName = (pathParts[pathParts.length - 1] || "New Project").replace(/\.git$/i, "");
 
-  // 1. Reset and Start Loading
-  setIsScanning(true);
-  setProgress(10); // Initial kick-off
+    console.log("🚀 Starting scan for:", scanPath, "projectName:", projectName);
 
-  // 2. Fake Progress Intervals (Simulating backend work)
-  const timer1 = setTimeout(() => setProgress(30), 800);  // "Reading Files..."
-  const timer2 = setTimeout(() => setProgress(60), 2000); // "Running Security Checks..."
-  const timer3 = setTimeout(() => setProgress(90), 3500); // "Finalizing Report..."
+    setIsScanning(true);
+    setProgress(10); // Initial kick-off
 
-  try {
-    console.log("📡 Sending scan request to backend...");
-    const response = await fetch("http://127.0.0.1:8000/scan", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        repo_url: scanPath,
-        project_name: projectName,
-        gh_token: localStorage.getItem("gh_token"),
-      }),
-    });
+    const timer1 = setTimeout(() => setProgress(30), 800);  // "Reading Files..."
+    const timer2 = setTimeout(() => setProgress(60), 2000); // "Running Security Checks..."
+    const timer3 = setTimeout(() => setProgress(90), 3500); // "Finalizing Report..."
 
-    console.log("📡 Scan API response status:", response.status);
-    const responseData = await response.json();
-    console.log("📋 Scan response data:", responseData);
+    try {
+      console.log("📡 Sending scan request to backend...");
+      const response = await fetch("http://127.0.0.1:8000/scan", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          repo_url: scanPath,
+          project_name: projectName,
+          gh_token: localStorage.getItem("gh_token"),
+          team_id: selectedTeam || null,
+        }),
+      });
 
-    if (response.ok) {
-      setProgress(100); // 🎯 Jump to finish
-      setTimeout(() => {
-        setScanPath("");
-        console.log("🔄 Refreshing projects after scan...");
-        fetchProjects();
-        alert("Scan Completed Successfully!");
-        setIsScanning(false);
-        setProgress(0); // Reset for next time
-      }, 500);
-    } else {
-      throw new Error(`Scan failed: ${responseData.detail || 'Unknown error'}`);
+      console.log("📡 Scan API response status:", response.status);
+      const responseData = await response.json();
+      console.log("📋 Scan response data:", responseData);
+
+      if (response.ok) {
+        setProgress(100); // 🎯 Jump to finish
+        setTimeout(async () => {
+          setScanPath("");
+          console.log("🔄 Refreshing projects after scan...");
+          await fetchProjects(projectName);
+          alert("Scan Completed Successfully!");
+          setIsScanning(false);
+          setProgress(0); // Reset for next time
+        }, 500);
+      } else {
+        throw new Error(`Scan failed: ${responseData.detail || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error("❌ Scan Error:", err);
+      alert(`Scan failed: ${err.message}`);
+      setIsScanning(false);
+      setProgress(0);
+    } finally {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      clearTimeout(timer3);
     }
-  } catch (err) {
-    console.error("❌ Scan Error:", err);
-    alert(`Scan failed: ${err.message}`);
-    setIsScanning(false);
-    setProgress(0);
-  } finally {
-    // Clear timers if the request finishes early or fails
-    clearTimeout(timer1);
-    clearTimeout(timer2);
-    clearTimeout(timer3);
-  }
-};
+  };
 
   return (
     <div className="flex min-h-screen bg-gray-100 font-sans">
@@ -422,6 +499,45 @@ const Dashboard = () => {
         <span>Private Scan Mode</span>
       </div>
     )}
+
+    <div className="mt-4 grid gap-4 md:grid-cols-2">
+      <div>
+        <label className="text-sm font-bold text-gray-700">Scan as Team</label>
+        <select
+          value={selectedTeam}
+          onChange={(e) => setSelectedTeam(e.target.value)}
+          className="mt-2 w-full border border-gray-200 rounded-xl px-3 py-3 text-sm"
+        >
+          <option value="">Personal Project</option>
+          {teams.map((team) => (
+            <option key={team.id} value={team.id}>
+              {team.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="text-sm font-bold text-gray-700">Invite Member</label>
+        <div className="mt-2 flex gap-2">
+          <input
+            type="email"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            placeholder="Enter user email"
+            className="flex-1 border border-gray-200 rounded-xl px-3 py-3 text-sm"
+          />
+          <button
+            onClick={inviteMember}
+            className="bg-blue-600 text-white px-4 py-3 rounded-xl text-sm font-bold hover:bg-blue-700"
+          >
+            Invite
+          </button>
+        </div>
+        {inviteMessage && <p className="mt-2 text-sm text-green-600">{inviteMessage}</p>}
+        {inviteError && <p className="mt-2 text-sm text-red-600">{inviteError}</p>}
+      </div>
+    </div>
 
     {/* REPO SELECTOR LIST */}
     {showRepoModal && (

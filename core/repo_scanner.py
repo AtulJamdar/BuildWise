@@ -12,7 +12,7 @@ def remove_readonly(func, path, excinfo):
     os.chmod(path, stat.S_IWRITE)
     func(path)
 
-def scan_github_repo(repo_url, user_id, gh_token=None):
+def scan_github_repo(repo_url, user_id, gh_token=None, team_id=None):
     """
     Clones a GitHub repository to a temporary folder, 
     runs the scanner, and then cleans up.
@@ -38,7 +38,7 @@ def scan_github_repo(repo_url, user_id, gh_token=None):
         print(f"✅ Clone complete. Starting scan for User ID: {user_id}")
 
         # 3. Trigger the actual scan logic
-        scan_result = scan_project(temp_dir, suggested_name, user_id, repo_url)
+        scan_result = scan_project(temp_dir, suggested_name, user_id, repo_url, team_id=team_id)
         print(f"📊 Scan result: {scan_result}")
 
         return scan_result

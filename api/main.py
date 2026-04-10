@@ -4,17 +4,18 @@ from fastapi import FastAPI, Body, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from dotenv import load_dotenv
-from core.project_service import get_or_create_project
+from core.project_service import get_or_create_project, get_user_projects, get_project_scans, verify_project_access, verify_issue_access, verify_scan_access
 
 # Import your local services
-from core.project_service import get_user_projects, get_project_scans
 from core.issue_service import get_scan_issues, get_issue_by_id, update_issue_status
 from core.scanner import scan_project
-from core.user_service import login_user, register_user, generate_reset_token, reset_password
+from core.user_service import login_user, register_user, generate_reset_token, reset_password, get_user_plan_info, increment_scan_count
+from core.team_service import create_team, get_user_teams, add_member_to_team, user_is_team_member, get_team_by_id, get_team_projects as get_team_projects_for_team
 from utils.dependencies import get_current_user
 from core.repo_scanner import scan_github_repo
 import requests
 from fastapi.responses import RedirectResponse
+from datetime import datetime, timezone
 
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -121,14 +122,17 @@ def get_projects(user_id: int = Depends(get_current_user)):
     result = []
     for p in projects:
         project_id = p[0]
-        # Count scans for this project
+        team_id = p[2] if len(p) > 2 else None
+        team_name = p[3] if len(p) > 3 else None
         cur.execute("SELECT COUNT(*) FROM reports WHERE project_id = %s", (project_id,))
         scan_count = cur.fetchone()[0]
         print(f"📊 Project {p[1]} (id: {project_id}) has {scan_count} scans")
         
         result.append({
-            "id": p[0],
+            "id": project_id,
             "name": p[1],
+            "team_id": team_id,
+            "team_name": team_name,
             "total_scans": scan_count
         })
     
@@ -137,18 +141,24 @@ def get_projects(user_id: int = Depends(get_current_user)):
 
 @app.get("/projects/{project_id}/scans")
 def get_scans(project_id: int, user_id: int = Depends(get_current_user)):
-    scans = get_project_scans(project_id)
+    scans = get_project_scans(project_id, user_id)
+    if scans is None:
+        raise HTTPException(status_code=403, detail="Access denied to this project")
     return [{"id": s[0], "score": s[1], "created_at": str(s[2])} for s in scans]
 
 # --- 🛠️ ISSUES ---
 
 @app.get("/scans/{scan_id}/issues")
 def get_issues(scan_id: int, user_id: int = Depends(get_current_user)):
+    if not verify_scan_access(scan_id, user_id):
+        raise HTTPException(status_code=403, detail="Access denied to this scan")
     issues = get_scan_issues(scan_id)
     return [{"id": i[0], "file": i[1], "severity": i[2], "title": i[3], "status": i[4]} for i in issues]
 
 @app.get("/issues/{issue_id}")
 def get_issue(issue_id: int, user_id: int = Depends(get_current_user)):
+    if not verify_issue_access(issue_id, user_id):
+        raise HTTPException(status_code=403, detail="Access denied to this issue")
     issue = get_issue_by_id(issue_id)
     if not issue: 
         raise HTTPException(status_code=404, detail="Issue not found")
@@ -167,6 +177,8 @@ def get_issue(issue_id: int, user_id: int = Depends(get_current_user)):
 
 @app.put("/issues/{issue_id}")
 def update_issue(issue_id: int, data: dict = Body(...), user_id: int = Depends(get_current_user)):
+    if not verify_issue_access(issue_id, user_id):
+        raise HTTPException(status_code=403, detail="Access denied to this issue")
     status_val = data.get("status")
     if status_val not in ["OPEN", "FIXED", "IGNORED"]:
         raise HTTPException(status_code=400, detail="Invalid status")
@@ -185,16 +197,33 @@ async def get_ai_suggestions(data: dict = Body(...), user_id: int = Depends(get_
     cur = conn.cursor()
     try:
         cur.execute(
-            "SELECT role_type, experience_level, tech_stack FROM users WHERE id=%s",
+            "SELECT role_type, experience_level, tech_stack, plan, trial_ends FROM users WHERE id=%s",
             (user_id,)
         )
         user_row = cur.fetchone()
-        
-        # Fallback if profile is somehow missing
-        role_type, experience_level, tech_stack = user_row if user_row else ("developer", "intermediate", "Fullstack")
+
+        if user_row:
+            role_type, experience_level, tech_stack, plan, trial_ends = user_row
+        else:
+            role_type, experience_level, tech_stack, plan, trial_ends = (
+                "developer", "intermediate", "Fullstack", "free", None
+            )
     finally:
         cur.close()
         conn.close()
+
+    # Basic AI experience for free users outside trial window
+    trial_active = False
+    if trial_ends:
+        if isinstance(trial_ends, str):
+            trial_ends = datetime.fromisoformat(trial_ends)
+        trial_active = datetime.now(timezone.utc) < trial_ends
+
+    if plan == "free" and not trial_active:
+        return {"suggestions": [
+            "Your free plan includes basic AI suggestions. Upgrade to PRO for advanced guidance.",
+            "Run more scans and fix the first issue to see better recommendations.",
+        ]}
 
     # --- 🧠 Step 2: Extract Project Data ---
     project_name = data.get("project_name", "Unknown Project")
@@ -322,12 +351,26 @@ def get_profile(user_id: int = Depends(get_current_user)):
 
         print(f"✅ Profile retrieved: {user[0]}")
         
+        plan_row = None
+        try:
+            cur.execute(
+                "SELECT plan, scan_count, scan_limit, trial_ends FROM users WHERE id=%s",
+                (user_id,)
+            )
+            plan_row = cur.fetchone()
+        except Exception:
+            plan_row = None
+
         return {
             "name": user[0],
             "email": user[1],
             "role_type": user[2],
             "experience_level": user[3],
-            "tech_stack": user[4]
+            "tech_stack": user[4],
+            "plan": plan_row[0] if plan_row else "free",
+            "scan_count": plan_row[1] if plan_row else 0,
+            "scan_limit": plan_row[2] if plan_row else 10,
+            "trial_ends": str(plan_row[3]) if plan_row and plan_row[3] else None
         }
     except Exception as e:
         print(f"❌ Error fetching profile: {e}")
@@ -335,6 +378,72 @@ def get_profile(user_id: int = Depends(get_current_user)):
     finally:
         cur.close()
         conn.close()
+
+
+@app.get("/plan")
+def get_plan(user_id: int = Depends(get_current_user)):
+    plan_info = get_user_plan_info(user_id)
+    if not plan_info:
+        raise HTTPException(status_code=404, detail="User plan not found")
+
+    trial_active = False
+    if plan_info.get("trial_ends"):
+        trial_ends = plan_info["trial_ends"]
+        if isinstance(trial_ends, str):
+            trial_ends = datetime.fromisoformat(trial_ends)
+        trial_active = datetime.now(timezone.utc) < trial_ends
+
+    return {
+        "plan": plan_info["plan"],
+        "scan_count": plan_info["scan_count"],
+        "scan_limit": plan_info["scan_limit"],
+        "trial_ends": str(plan_info["trial_ends"]) if plan_info["trial_ends"] else None,
+        "trial_active": trial_active
+    }
+
+
+@app.post("/teams")
+def create_team_endpoint(data: dict = Body(...), user_id: int = Depends(get_current_user)):
+    name = data.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="Team name is required")
+
+    team_id = create_team(name, user_id)
+    return {"message": "Team created successfully", "team_id": team_id}
+
+
+@app.get("/teams")
+def list_teams(user_id: int = Depends(get_current_user)):
+    teams = get_user_teams(user_id)
+    return [
+        {"id": t[0], "name": t[1], "owner_id": t[2], "role": t[3]}
+        for t in teams
+    ]
+
+
+@app.post("/teams/invite")
+def invite_team_member(data: dict = Body(...), user_id: int = Depends(get_current_user)):
+    team_id = data.get("team_id")
+    email = data.get("email")
+    role = data.get("role", "member")
+
+    if not team_id or not email:
+        raise HTTPException(status_code=400, detail="team_id and email are required")
+
+    invite_result = add_member_to_team(team_id, email, user_id, role)
+    if not invite_result.get("success"):
+        raise HTTPException(status_code=400, detail=invite_result.get("message"))
+
+    return {"message": invite_result.get("message")}
+
+
+@app.get("/teams/{team_id}/projects")
+def get_team_projects(team_id: int, user_id: int = Depends(get_current_user)):
+    if not user_is_team_member(user_id, team_id):
+        raise HTTPException(status_code=403, detail="Access denied to this team")
+
+    projects = get_team_projects_for_team(team_id)
+    return [{"id": p[0], "name": p[1]} for p in projects]
 
 
 @app.put("/profile")
@@ -387,22 +496,43 @@ def update_profile(
 async def run_security_scan(data: dict = Body(...), user_id: int = Depends(get_current_user)):
     repo_url = data.get("repo_url")
     gh_token = data.get("gh_token")
+    team_id = data.get("team_id")
 
     if not repo_url:
         raise HTTPException(status_code=400, detail="Repository URL is required")
 
-    print(f"🔍 Scan request received for repo_url: {repo_url}, user_id: {user_id}")
+    plan_info = get_user_plan_info(user_id)
+    if not plan_info:
+        raise HTTPException(status_code=404, detail="User plan not found")
+
+    trial_active = False
+    if plan_info.get("trial_ends"):
+        trial_ends = plan_info["trial_ends"]
+        if isinstance(trial_ends, str):
+            trial_ends = datetime.fromisoformat(trial_ends)
+        trial_active = datetime.now(timezone.utc) < trial_ends
+
+    if plan_info["plan"] != "team" and not trial_active:
+        if plan_info["scan_count"] >= plan_info["scan_limit"]:
+            raise HTTPException(status_code=403, detail="Scan limit reached. Upgrade your plan.")
+
+    if team_id:
+        if not user_is_team_member(user_id, team_id):
+            raise HTTPException(status_code=403, detail="You must be a team member to scan for this team.")
+
+    print(f"🔍 Scan request received for repo_url: {repo_url}, user_id: {user_id}, team_id: {team_id}")
 
     try:
-        # 🌐 If it's a GitHub link, use the cloning logic
         if "github.com" in repo_url:
             print(f"🌍 Detected GitHub URL. Cloning and Scanning...")
-            result = scan_github_repo(repo_url, user_id, gh_token)
+            result = scan_github_repo(repo_url, user_id, gh_token, team_id=team_id)
         else:
-            # 📂 Otherwise, treat as local path
             from core.scanner import scan_project
             project_name = repo_url.split("/")[-1]
-            result = scan_project(repo_url, project_name, user_id, repo_url)
+            result = scan_project(repo_url, project_name, user_id, repo_url, team_id=team_id)
+
+        if result.get("status") == "success":
+            increment_scan_count(user_id)
 
         print(f"✅ Scan completed successfully: {result}")
         return {"message": "Scan completed successfully", "details": result}
