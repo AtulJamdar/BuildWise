@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import Sidebar from "../components/Sidebar";
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -94,43 +95,7 @@ export default function Profile() {
 
   return (
     <div className="flex min-h-screen bg-gray-100 font-sans">
-      {/* Sidebar */}
-      <aside className="w-64 bg-white shadow-xl flex flex-col border-r border-gray-200">
-        <div className="p-6">
-          <h2 className="text-2xl font-black text-blue-600 tracking-tighter">BuildWise</h2>
-          <p className="text-[10px] uppercase tracking-widest text-gray-400 font-bold mt-1">AI Security Suite</p>
-        </div>
-        <nav className="flex-1 px-4 space-y-2">
-          <button 
-            onClick={() => navigate("/dashboard")}
-            className="flex items-center w-full text-left px-4 py-3 rounded-xl text-gray-500 hover:bg-gray-50"
-          >
-            📊 Dashboard
-          </button>
-          <button 
-            onClick={() => navigate("/profile")}
-            className="flex items-center w-full text-left px-4 py-3 rounded-xl bg-blue-50 text-blue-700 font-bold"
-          >
-            👤 Profile
-          </button>
-          <button className="flex items-center w-full text-left px-4 py-3 rounded-xl text-gray-500 hover:bg-gray-50">
-            ⚙️ Settings
-          </button>
-        </nav>
-        <div className="p-4 border-t">
-          <button 
-            onClick={() => {
-              localStorage.removeItem("token");
-              navigate("/");
-            }}
-            className="w-full px-4 py-3 bg-red-50 text-red-600 font-bold rounded-lg hover:bg-red-100 transition-all text-sm border border-red-100"
-          >
-            Logout
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
+      <Sidebar />
       <main className="flex-1 flex flex-col h-screen overflow-y-auto">
         <header className="flex justify-between items-center bg-white px-8 py-4 shadow-sm border-b sticky top-0 z-10">
           <h1 className="text-xl font-bold text-gray-800">Profile Settings</h1>

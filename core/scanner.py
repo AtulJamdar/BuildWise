@@ -1,4 +1,5 @@
 import os
+import uuid
 from core.rules_engine import run_all_checks
 from core.report import generate_report
 from core.report_service import save_report
@@ -86,7 +87,10 @@ def scan_project(path, project_name, user_id, repo_url=None, team_id=None):
         # 3. Flatten issue map into final results list
         final_results = []
         for path_key, issues in file_issue_map.items():
-            final_results.extend(issues)
+            for issue in issues:
+                if "id" not in issue:
+                    issue["id"] = str(uuid.uuid4())
+                final_results.append(issue)
 
         # 4. Finalize and Save
         score, summary = generate_report(final_results)

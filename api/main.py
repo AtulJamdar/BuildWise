@@ -1,9 +1,11 @@
+import base64
 import os
 import json
 from fastapi import FastAPI, Body, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from dotenv import load_dotenv
+from db.connection import get_connection
 from core.project_service import get_or_create_project, get_user_projects, get_project_scans, verify_project_access, verify_issue_access, verify_scan_access
 
 # Import your local services
@@ -12,6 +14,8 @@ from core.scanner import scan_project
 from core.user_service import login_user, register_user, generate_reset_token, reset_password, get_user_plan_info, increment_scan_count
 from core.team_service import create_team, get_user_teams, add_member_to_team, user_is_team_member, get_team_by_id, get_team_projects as get_team_projects_for_team
 from utils.dependencies import get_current_user
+from utils.token import generate_invite_token
+from utils.email_service import send_invite_email
 from core.repo_scanner import scan_github_repo
 import requests
 import razorpay
@@ -25,16 +29,33 @@ from datetime import datetime, timezone
 
 load_dotenv()
 config = Config(environ=os.environ)
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
-RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-SECRET_KEY = os.getenv("SECRET_KEY", "supersecret")
+
+def get_env(key, default=None):
+    value = os.getenv(key, default)
+    return value.strip() if isinstance(value, str) else value
+
+client = Groq(api_key=get_env("GROQ_API_KEY"))
+RAZORPAY_KEY_ID = get_env("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = get_env("RAZORPAY_KEY_SECRET")
+GOOGLE_CLIENT_ID = get_env("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = get_env("GOOGLE_CLIENT_SECRET")
+SECRET_KEY = get_env("SECRET_KEY", "supersecret")
+
+# Patch requests auth to support UTF-8 credentials if needed.
+import requests.auth
+
+def _basic_auth_str_utf8(username, password):
+    username_bytes = username.encode("utf-8") if isinstance(username, str) else username
+    password_bytes = password.encode("utf-8") if isinstance(password, str) else password
+    user_pass = base64.b64encode(username_bytes + b":" + password_bytes).decode("latin1")
+    return "Basic %s" % user_pass
+
+requests.auth._basic_auth_str = _basic_auth_str_utf8
+
 razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", f"{BACKEND_URL}/auth/google/callback")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+BACKEND_URL = get_env("BACKEND_URL", "http://localhost:8000")
+GOOGLE_REDIRECT_URI = get_env("GOOGLE_REDIRECT_URI", f"{BACKEND_URL}/auth/google/callback")
+FRONTEND_URL = get_env("FRONTEND_URL", "http://localhost:5173")
 
 oauth = OAuth(config)
 oauth.register(
@@ -50,13 +71,34 @@ app = FastAPI(title="BuildWise API")
 # --- CORS Configuration ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[FRONTEND_URL],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+
+@app.on_event("startup")
+def ensure_tables_exist():
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS invitations (
+                id SERIAL PRIMARY KEY,
+                team_id INT NOT NULL,
+                email TEXT NOT NULL,
+                token TEXT NOT NULL UNIQUE,
+                status TEXT DEFAULT 'pending'
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
 @app.get("/")
 def home():
@@ -502,18 +544,106 @@ def list_teams(user_id: int = Depends(get_current_user)):
 
 @app.post("/teams/invite")
 def invite_team_member(data: dict = Body(...), user_id: int = Depends(get_current_user)):
+    from db.connection import get_connection
+
     team_id = data.get("team_id")
     email = data.get("email")
-    role = data.get("role", "member")
 
     if not team_id or not email:
         raise HTTPException(status_code=400, detail="team_id and email are required")
 
-    invite_result = add_member_to_team(team_id, email, user_id, role)
-    if not invite_result.get("success"):
-        raise HTTPException(status_code=400, detail=invite_result.get("message"))
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        # Ensure team exists and the user is allowed to invite.
+        cur.execute("SELECT id FROM teams WHERE id = %s", (team_id,))
+        team = cur.fetchone()
+        if not team:
+            raise HTTPException(status_code=404, detail="Team not found")
 
-    return {"message": invite_result.get("message")}
+        cur.execute(
+            "SELECT role FROM team_members WHERE team_id = %s AND user_id = %s",
+            (team_id, user_id)
+        )
+        role_row = cur.fetchone()
+        if not role_row or role_row[0] not in ("admin", "owner"):
+            raise HTTPException(status_code=403, detail="Only team admins can invite members")
+
+        token = generate_invite_token()
+        cur.execute(
+            "INSERT INTO invitations (team_id, email, token) VALUES (%s, %s, %s)",
+            (team_id, email.lower(), token)
+        )
+        conn.commit()
+
+        invite_link = f"{FRONTEND_URL}/accept-invite/{token}"
+        send_invite_email(email, invite_link)
+
+        return {"message": "Invitation email sent successfully."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as exc:
+        conn.rollback()
+        print(f"❌ Invite email failed: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to send invitation email")
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/accept-invite/{token}")
+def accept_invite(token: str, user_id: int = Depends(get_current_user)):
+    from db.connection import get_connection
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT email FROM users WHERE id = %s", (user_id,))
+        user_row = cur.fetchone()
+        if not user_row:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        current_user_email = user_row[0].lower()
+        cur.execute(
+            "SELECT team_id, email, status FROM invitations WHERE token = %s",
+            (token,)
+        )
+        invite = cur.fetchone()
+
+        if not invite or invite[2] != "pending":
+            raise HTTPException(status_code=404, detail="Invalid or expired invite")
+
+        team_id, invite_email, status = invite
+        if current_user_email != invite_email.lower():
+            raise HTTPException(status_code=403, detail="This invite was sent to a different email address")
+
+        cur.execute(
+            "SELECT 1 FROM team_members WHERE team_id = %s AND user_id = %s",
+            (team_id, user_id)
+        )
+        if not cur.fetchone():
+            cur.execute(
+                "INSERT INTO team_members (team_id, user_id, role) VALUES (%s, %s, %s)",
+                (team_id, user_id, "member")
+            )
+
+        cur.execute(
+            "UPDATE invitations SET status = 'accepted' WHERE token = %s",
+            (token,)
+        )
+        conn.commit()
+        return {"message": "Joined team successfully."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as exc:
+        conn.rollback()
+        print(f"❌ Accept invite failed: {exc}")
+        raise HTTPException(status_code=500, detail="Unable to accept invite")
+    finally:
+        cur.close()
+        conn.close()
 
 
 @app.get("/teams/{team_id}/projects")
@@ -642,8 +772,14 @@ def create_order(user_id: int = Depends(get_current_user)):
         }
 
     except Exception as e:
+        msg = str(e)
         print(f"🔥 Razorpay Order Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        if "authentication" in msg.lower() or "401" in msg.lower():
+            raise HTTPException(
+                status_code=500,
+                detail="Razorpay authentication failed. Check RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET."
+            )
+        raise HTTPException(status_code=500, detail=msg)
 
 
 @app.post("/verify-payment")

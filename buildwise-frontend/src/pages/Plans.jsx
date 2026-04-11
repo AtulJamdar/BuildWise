@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import Sidebar from "../components/Sidebar";
 
 export default function Plans() {
   const navigate = useNavigate();
@@ -129,69 +130,77 @@ export default function Plans() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6 font-sans">
-      <div className="max-w-6xl mx-auto">
-        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-3xl font-black text-gray-900">Plans & Usage</h1>
-            <p className="mt-2 text-gray-600">Choose the best plan for your security workflow.</p>
-          </div>
-          <button
-            onClick={() => navigate("/dashboard")}
-            className="rounded-full border border-gray-300 bg-white px-5 py-3 text-sm font-bold text-gray-600 transition hover:bg-gray-50"
-          >
-            Back to Dashboard
-          </button>
-        </div>
-
-        {message && (
-          <div className="mb-6 rounded-3xl border border-green-200 bg-green-50 px-5 py-4 text-sm font-medium text-green-800">
-            {message}
-          </div>
-        )}
-
-        <div className="grid gap-6 md:grid-cols-3">
-          <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-bold">Free</h2>
-            <ul className="mt-4 space-y-2 text-sm text-gray-600">
-              <li>✔ 10 scans/month</li>
-              <li>✔ Basic analysis</li>
-              <li>✖ No team features</li>
-            </ul>
-            {usage && (
-              <div className="mt-6 rounded-2xl bg-gray-50 p-4 text-sm text-gray-700">
-                <div className="font-semibold">Current usage</div>
-                <p className="mt-2">{usage.used} / {usage.limit} scans</p>
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-lg">
-            <h2 className="text-xl font-bold">Pro</h2>
-            <ul className="mt-4 space-y-2 text-sm text-gray-600">
-              <li>✔ 100 scans/month</li>
-              <li>✔ Private repo scanning</li>
-              <li>✔ Advanced AI suggestions</li>
-            </ul>
+    <div className="flex min-h-screen bg-gray-100 font-sans">
+      <Sidebar />
+      <main className="flex-1 p-6">
+        <div className="max-w-6xl mx-auto">
+          {/* Header Section */}
+          <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h1 className="text-3xl font-black text-gray-900">Plans & Usage</h1>
+              <p className="mt-2 text-gray-600">Choose the best plan for your security workflow.</p>
+            </div>
             <button
-              onClick={handleUpgrade}
-              disabled={isProcessing}
-              className="mt-6 w-full rounded-xl bg-black px-4 py-3 text-sm font-bold text-white transition hover:bg-gray-900 disabled:cursor-not-allowed disabled:bg-gray-500"
+              onClick={() => navigate("/dashboard")}
+              className="rounded-full border border-gray-300 bg-white px-5 py-3 text-sm font-bold text-gray-600 transition hover:bg-gray-50"
             >
-              {isProcessing ? "Processing…" : "Upgrade"}
+              Back to Dashboard
             </button>
           </div>
 
-          <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-bold">Team</h2>
-            <ul className="mt-4 space-y-2 text-sm text-gray-600">
-              <li>✔ Unlimited scans</li>
-              <li>✔ Team collaboration</li>
-              <li>✔ Shared reports</li>
-            </ul>
+          {message && (
+            <div className="mb-6 rounded-3xl border border-green-200 bg-green-50 px-5 py-4 text-sm font-medium text-green-800">
+              {message}
+            </div>
+          )}
+
+          {/* Pricing Grid */}
+          <div className="grid gap-6 md:grid-cols-3">
+            {/* Free Plan */}
+            <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-bold">Free</h2>
+              <ul className="mt-4 space-y-2 text-sm text-gray-600">
+                <li>✔ 10 scans/month</li>
+                <li>✔ Basic analysis</li>
+                <li>✖ No team features</li>
+              </ul>
+              {usage && (
+                <div className="mt-6 rounded-2xl bg-gray-50 p-4 text-sm text-gray-700">
+                  <div className="font-semibold">Current usage</div>
+                  <p className="mt-2">{usage.used} / {usage.limit} scans</p>
+                </div>
+              )}
+            </div>
+
+            {/* Pro Plan */}
+            <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-lg">
+              <h2 className="text-xl font-bold">Pro</h2>
+              <ul className="mt-4 space-y-2 text-sm text-gray-600">
+                <li>✔ 100 scans/month</li>
+                <li>✔ Private repo scanning</li>
+                <li>✔ Advanced AI suggestions</li>
+              </ul>
+              <button
+                onClick={handleUpgrade}
+                disabled={isProcessing}
+                className="mt-6 w-full rounded-xl bg-black px-4 py-3 text-sm font-bold text-white transition hover:bg-gray-900 disabled:cursor-not-allowed disabled:bg-gray-500"
+              >
+                {isProcessing ? "Processing…" : "Upgrade"}
+              </button>
+            </div>
+
+            {/* Team Plan */}
+            <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-bold">Team</h2>
+              <ul className="mt-4 space-y-2 text-sm text-gray-600">
+                <li>✔ Unlimited scans</li>
+                <li>✔ Team collaboration</li>
+                <li>✔ Shared reports</li>
+              </ul>
+            </div>
           </div>
-        </div>
-      </div>
-    </div>
+        </div> {/* Close max-w-6xl */}
+      </main> {/* Close flex-1 */}
+    </div> 
   );
 }

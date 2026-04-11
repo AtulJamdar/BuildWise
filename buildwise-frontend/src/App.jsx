@@ -7,6 +7,11 @@ import Onboarding from "./pages/Onboarding";
 import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
 import OAuthSuccess from "./pages/OAuthSuccess";
+import AcceptInvite from "./pages/AcceptInvite";
+import IssueDetails from "./pages/IssueDetails";
+import Projects from "./pages/Projects";
+import Teams from "./pages/Teams";
+import Sidebar from "./components/Sidebar";
 
 // --- DASHBOARD COMPONENT ---
 // This contains all your logic for projects, scans, and AI
@@ -36,9 +41,6 @@ const Dashboard = () => {
   const [planInfo, setPlanInfo] = useState(null);
   const [planError, setPlanError] = useState("");
   const [usage, setUsage] = useState(null);
-  const [newTeamName, setNewTeamName] = useState("");
-  const [teamMessage, setTeamMessage] = useState("");
-  const [teamError, setTeamError] = useState("");
   const [isUpgrading, setIsUpgrading] = useState(false);
 
   // Get username from localStorage
@@ -204,40 +206,6 @@ const Dashboard = () => {
       setUsage(data);
     } catch (err) {
       console.error("❌ Usage Fetch Error:", err);
-    }
-  };
-
-  const createTeam = async () => {
-    const token = localStorage.getItem("token");
-    setTeamMessage("");
-    setTeamError("");
-
-    if (!newTeamName.trim()) {
-      setTeamError("Enter a team name first.");
-      return;
-    }
-
-    try {
-      const res = await fetch("http://localhost:8000/teams", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ name: newTeamName.trim() }),
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.detail || "Failed to create team");
-      }
-
-      setNewTeamName("");
-      setTeamMessage("Team created successfully.");
-      await fetchTeams();
-    } catch (err) {
-      console.error("❌ Team Create Error:", err);
-      setTeamError(err.message);
     }
   };
 
@@ -594,43 +562,7 @@ const Dashboard = () => {
 
   return (
     <div className="flex min-h-screen bg-gray-100 font-sans">
-      <aside className="w-64 bg-white shadow-xl flex flex-col border-r border-gray-200">
-        <div className="p-6">
-          <h2 className="text-2xl font-black text-blue-600 tracking-tighter">BuildWise</h2>
-          <p className="text-[10px] uppercase tracking-widest text-gray-400 font-bold mt-1">AI Security Suite</p>
-        </div>
-        <nav className="flex-1 px-4 space-y-2">
-          <button className="flex items-center w-full text-left px-4 py-3 rounded-xl bg-blue-50 text-blue-700 font-bold">📊 Dashboard</button>
-          <button className="flex items-center w-full text-left px-4 py-3 rounded-xl text-gray-500 hover:bg-gray-50">📁 Projects</button>
-          <button className="flex items-center w-full text-left px-4 py-3 rounded-xl text-gray-500 hover:bg-gray-50">📝 Reports</button>
-          <button onClick={() => navigate("/profile")} className="flex items-center w-full text-left px-4 py-3 rounded-xl text-gray-500 hover:bg-gray-50">👤 Profile</button>
-          <button className="flex items-center w-full text-left px-4 py-3 rounded-xl text-gray-500 hover:bg-gray-50">⚙️ Settings</button>
-        </nav>
-        <div className="p-4 border-t space-y-3">
-          <div className="bg-slate-900 rounded-xl p-4 text-white">
-            <p className="text-[10px] font-bold opacity-50 uppercase">Current Plan</p>
-            <p className="text-sm font-bold">{planInfo?.plan?.toUpperCase() || "FREE"}</p>
-            {planInfo?.trial_active && <p className="text-[10px] mt-2 text-blue-200">Trial active</p>}
-          </div>
-
-          {usage && (
-            <div
-              onClick={() => navigate("/plans")}
-              className="cursor-pointer rounded-3xl bg-gray-900 p-4 text-white transition hover:bg-gray-800"
-            >
-              <div className="text-sm font-semibold">{usage.plan?.toUpperCase() || "FREE"} PLAN</div>
-              <div className="text-xs mt-1 text-gray-300">{usage.used} / {usage.limit} scans used</div>
-              <div className="w-full bg-gray-700 h-2 rounded-full mt-3 overflow-hidden">
-                <div
-                  className="bg-green-500 h-2 rounded-full transition-all"
-                  style={{ width: `${Math.min(100, (usage.used / Math.max(usage.limit, 1)) * 100)}%` }}
-                ></div>
-              </div>
-            </div>
-          )}
-        </div>
-      </aside>
-
+      <Sidebar />
       <main className="flex-1 flex flex-col h-screen overflow-y-auto">
         <header className="flex justify-between items-center bg-white px-8 py-4 shadow-sm border-b sticky top-0 z-10">
           <div>
@@ -687,28 +619,13 @@ const Dashboard = () => {
             <p className="text-sm uppercase tracking-widest text-gray-500 font-bold">Quick Actions</p>
             <div className="mt-4 space-y-4">
               <div>
-                <label className="block text-xs uppercase tracking-widest text-gray-500 mb-2">Create New Team</label>
-                <input
-                  value={newTeamName}
-                  onChange={(e) => setNewTeamName(e.target.value)}
-                  placeholder="Team name"
-                  className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm"
-                />
-                <button
-                  onClick={createTeam}
-                  className="mt-3 w-full bg-blue-600 text-white px-4 py-3 rounded-xl text-sm font-bold hover:bg-blue-700"
-                >
-                  Create Team
-                </button>
                 <button
                   onClick={handleUpgrade}
                   disabled={planInfo?.plan === "pro" || isUpgrading}
-                  className={`mt-3 w-full px-4 py-3 rounded-xl text-sm font-bold transition-all ${planInfo?.plan === "pro" ? "bg-gray-300 text-gray-700 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+                  className={`w-full rounded-xl text-sm font-bold px-4 py-3 transition-all ${planInfo?.plan === "pro" ? "bg-gray-300 text-gray-700 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
                 >
                   {planInfo?.plan === "pro" ? "Pro Plan Active" : isUpgrading ? "Processing…" : "Upgrade to Pro"}
                 </button>
-                {teamMessage && <p className="mt-2 text-sm text-green-600">{teamMessage}</p>}
-                {teamError && <p className="mt-2 text-sm text-red-600">{teamError}</p>}
               </div>
             </div>
           </div>
@@ -954,7 +871,10 @@ const Dashboard = () => {
                               {group.issues.map((issue) => (
                                 <div
                                   key={issue.id}
-                                  onClick={() => fetchIssueDetail(issue.id)}
+                                  onClick={() => {
+                                    setSelectedIssue(null);
+                                    navigate(`/issue/${issue.id}`);
+                                  }}
                                   className={`p-4 bg-slate-50 rounded-2xl cursor-pointer transition-all border ${
                                     selectedIssue?.id === issue.id ? "border-blue-400 bg-blue-50" : "border-transparent hover:border-gray-200"
                                   }`}
@@ -1061,6 +981,10 @@ function App() {
         <Route path="/register" element={<Register />} />
         {/* We keep your dashboard on a specific route */}
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/projects" element={<Projects />} />
+        <Route path="/teams" element={<Teams />} />
+        <Route path="/accept-invite/:token" element={<AcceptInvite />} />
+        <Route path="/issue/:id" element={<IssueDetails />} />
         <Route path="/plans" element={<Plans />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/oauth-success" element={<OAuthSuccess />} />
