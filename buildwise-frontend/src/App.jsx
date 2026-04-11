@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
+import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -14,11 +15,13 @@ import IssueDetails from "./pages/IssueDetails";
 import Projects from "./pages/Projects";
 import Teams from "./pages/Teams";
 import Sidebar from "./components/Sidebar";
+import Navbar from "./components/Navbar";
 
 // --- DASHBOARD COMPONENT ---
 // This contains all your logic for projects, scans, and AI
 const Dashboard = () => {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [scans, setScans] = useState([]);
@@ -422,6 +425,7 @@ const Dashboard = () => {
       body: JSON.stringify({
         project_name: selectedProject.name,
         issues: currentIssues,
+        language: i18n.language || "en",
       }),
     })
       .then((res) => {
@@ -566,46 +570,61 @@ const Dashboard = () => {
     <div className="flex min-h-screen bg-gray-100 font-sans">
       <Sidebar />
       <main className="flex-1 flex flex-col h-screen overflow-y-auto">
-        <header className="flex justify-between items-center bg-white px-8 py-4 shadow-sm border-b sticky top-0 z-10">
+        <header className="flex flex-wrap justify-between items-center bg-white px-8 py-4 shadow-sm border-b sticky top-0 z-10">
           <div>
-            <h1 className="text-xl font-bold text-gray-800">Dashboard Overview</h1>
-            <p className="text-sm text-gray-500">Monitor your security scans, plans, and teams in one place.</p>
+            <h1 className="text-xl font-bold text-gray-800">{t("dashboard.overview")}</h1>
+            <p className="text-sm text-gray-500">{t("dashboard.description")}</p>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <span>{t("dashboard.selectLanguage")}</span>
+              <select
+                value={i18n.language}
+                onChange={(e) => {
+                  i18n.changeLanguage(e.target.value);
+                  localStorage.setItem("lang", e.target.value);
+                }}
+                className="border rounded px-2 py-1 text-sm"
+              >
+                <option value="en">EN</option>
+                <option value="hi">HI</option>
+                <option value="mr">MR</option>
+              </select>
+            </div>
             <div className="text-right">
               <p className="text-sm font-bold text-gray-900">{username}</p>
-              <p className="text-[10px] text-green-500 font-bold uppercase">Administrator</p>
+              <p className="text-[10px] text-green-500 font-bold uppercase">{t("dashboard.administrator")}</p>
             </div>
             <button 
               onClick={() => navigate("/")} 
               className="px-4 py-2 bg-red-50 text-red-600 font-bold rounded-lg hover:bg-red-500 hover:text-white transition-all text-sm border border-red-100"
             >
-              Logout
+              {t("dashboard.logout")}
             </button>
           </div>
         </header>
 
         <section className="p-8 bg-white rounded-3xl shadow-sm border border-blue-100 mb-10 grid gap-6 md:grid-cols-3">
           <div className="p-6 rounded-3xl bg-slate-50 border border-gray-100">
-            <p className="text-sm uppercase tracking-widest text-gray-500 font-bold">Current Plan</p>
+            <p className="text-sm uppercase tracking-widest text-gray-500 font-bold">{t("dashboard.currentPlan")}</p>
             <h2 className="mt-3 text-2xl font-black text-gray-900">{planInfo?.plan?.toUpperCase() || "FREE"}</h2>
-            <p className="text-sm text-gray-500 mt-2">{planInfo?.trial_active ? "Trial active" : "Standard plan"}</p>
+            <p className="text-sm text-gray-500 mt-2">{planInfo?.trial_active ? t("dashboard.trialActive") : t("dashboard.standardPlan")}</p>
             <div className="mt-5">
-              <p className="text-xs uppercase tracking-widest text-gray-400">Usage</p>
+              <p className="text-xs uppercase tracking-widest text-gray-400">{t("dashboard.usage")}</p>
               <div className="mt-2 bg-gray-200 rounded-full h-3 overflow-hidden">
                 <div
                   className="h-full bg-blue-600"
                   style={{ width: `${Math.min(100, planInfo?.scan_count / Math.max(planInfo?.scan_limit, 1) * 100)}%` }}
                 />
               </div>
-              <p className="mt-2 text-sm text-gray-600">{planInfo?.scan_count ?? 0}/{planInfo?.scan_limit ?? 10} scans used</p>
+              <p className="mt-2 text-sm text-gray-600">{planInfo?.scan_count ?? 0}/{planInfo?.scan_limit ?? 10} {t("dashboard.usage")}</p>
             </div>
           </div>
 
           <div className="p-6 rounded-3xl bg-slate-50 border border-gray-100">
-            <p className="text-sm uppercase tracking-widest text-gray-500 font-bold">Team Membership</p>
+            <p className="text-sm uppercase tracking-widest text-gray-500 font-bold">{t("dashboard.teamMembership")}</p>
             <h2 className="mt-3 text-2xl font-black text-gray-900">{teams.length}</h2>
-            <p className="text-sm text-gray-500 mt-2">Teams you own or belong to.</p>
+            <p className="text-sm text-gray-500 mt-2">{t("dashboard.teamDescription")}</p>
             <ul className="mt-4 space-y-3 text-sm text-gray-700">
               {teams.slice(0, 3).map((team) => (
                 <li key={team.id} className="flex items-center justify-between gap-2">
@@ -613,12 +632,12 @@ const Dashboard = () => {
                   <span className="text-xs uppercase tracking-widest text-blue-600 font-bold">{team.role}</span>
                 </li>
               ))}
-              {teams.length === 0 && <li className="text-gray-500">No teams yet</li>}
+              {teams.length === 0 && <li className="text-gray-500">{t("dashboard.noTeams")}</li>}
             </ul>
           </div>
 
           <div className="p-6 rounded-3xl bg-slate-50 border border-gray-100">
-            <p className="text-sm uppercase tracking-widest text-gray-500 font-bold">Quick Actions</p>
+            <p className="text-sm uppercase tracking-widest text-gray-500 font-bold">{t("dashboard.quickActions")}</p>
             <div className="mt-4 space-y-4">
               <div>
                 <button
@@ -626,7 +645,7 @@ const Dashboard = () => {
                   disabled={planInfo?.plan === "pro" || isUpgrading}
                   className={`w-full rounded-xl text-sm font-bold px-4 py-3 transition-all ${planInfo?.plan === "pro" ? "bg-gray-300 text-gray-700 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
                 >
-                  {planInfo?.plan === "pro" ? "Pro Plan Active" : isUpgrading ? "Processing…" : "Upgrade to Pro"}
+                  {planInfo?.plan === "pro" ? t("dashboard.proPlanActive") : isUpgrading ? t("dashboard.scanning") : t("dashboard.upgradeToPro")}
                 </button>
               </div>
             </div>
@@ -637,8 +656,8 @@ const Dashboard = () => {
 <section className="p-8 bg-white rounded-3xl shadow-sm border border-blue-100 mb-10">
   <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
     <div>
-      <h2 className="text-xl font-black text-gray-800">New Security Scan</h2>
-      <p className="text-sm text-gray-500">Analyze a repository for vulnerabilities.</p>
+      <h2 className="text-xl font-black text-gray-800">{t("dashboard.newScanTitle")}</h2>
+      <p className="text-sm text-gray-500">{t("dashboard.newScanDescription")}</p>
     </div>
     
     <div className="flex flex-1 max-w-2xl gap-3">
@@ -649,7 +668,7 @@ const Dashboard = () => {
           setScanPath(e.target.value);
           setSelectedRepo(null);
         }}
-        placeholder="Enter GitHub Repo URL"
+        placeholder={t("dashboard.repoPlaceholder")}
         className="flex-1 p-3 border-2 border-gray-100 rounded-xl focus:border-blue-500 outline-none transition-all text-sm"
         disabled={isScanning}
       />
@@ -660,31 +679,31 @@ const Dashboard = () => {
           isScanning ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 shadow-blue-100"
         }`}
       >
-        {isScanning ? "⏳ Scanning..." : "🚀 Start Scan"}
+        {isScanning ? t("dashboard.scanning") : t("dashboard.startScan")}
       </button>
       <button 
         onClick={handleFetchRepos}
         disabled={isScanning}
         className="self-end bg-gray-100 text-gray-700 px-4 py-3 rounded-xl hover:bg-gray-200 font-bold transition-all"
       >
-        {isFetchingRepos ? "⏳..." : "🐙 Import"}
+        {isFetchingRepos ? "⏳..." : t("dashboard.importing")}
       </button>
     </div>
     {selectedRepo?.private && (
       <div className="mt-4 inline-flex items-center gap-2 px-3 py-2 bg-red-100 text-red-700 rounded-xl text-xs font-semibold">
-        <span>Private Scan Mode</span>
+        <span>{t("dashboard.privateScanMode")}</span>
       </div>
     )}
 
     <div className="mt-4 grid gap-4 md:grid-cols-2">
       <div>
-        <label className="text-sm font-bold text-gray-700">Scan as Team</label>
+        <label className="text-sm font-bold text-gray-700">{t("dashboard.scanAsTeam")}</label>
         <select
           value={selectedTeam}
           onChange={(e) => setSelectedTeam(e.target.value)}
           className="mt-2 w-full border border-gray-200 rounded-xl px-3 py-3 text-sm"
         >
-          <option value="">Personal Project</option>
+          <option value="">{t("dashboard.personalProject")}</option>
           {teams.map((team) => (
             <option key={team.id} value={team.id}>
               {team.name}
@@ -694,20 +713,20 @@ const Dashboard = () => {
       </div>
 
       <div>
-        <label className="text-sm font-bold text-gray-700">Invite Member</label>
+        <label className="text-sm font-bold text-gray-700">{t("dashboard.inviteMember")}</label>
         <div className="mt-2 flex gap-2">
           <input
             type="email"
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
-            placeholder="Enter user email"
+            placeholder={t("dashboard.enterUserEmail")}
             className="flex-1 border border-gray-200 rounded-xl px-3 py-3 text-sm"
           />
           <button
             onClick={inviteMember}
             className="bg-blue-600 text-white px-4 py-3 rounded-xl text-sm font-bold hover:bg-blue-700"
           >
-            Invite
+            {t("dashboard.invite")}
           </button>
         </div>
         {inviteMessage && <p className="mt-2 text-sm text-green-600">{inviteMessage}</p>}
@@ -719,8 +738,7 @@ const Dashboard = () => {
     {showRepoModal && (
       <div className="mt-4 bg-white border border-gray-100 rounded-2xl shadow-2xl max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-2">
         <div className="sticky top-0 bg-gray-50 p-3 border-b flex justify-between items-center">
-          <span className="text-xs font-bold text-gray-500 uppercase">Your Repositories</span>
-          <button onClick={() => setShowRepoModal(false)} className="text-gray-400 hover:text-red-500">✕</button>
+          <span className="text-xs font-bold text-gray-500 uppercase">{t("dashboard.yourRepositories")}</span>
         </div>
         
         {ghRepos.length === 0 ? (
@@ -778,7 +796,7 @@ const Dashboard = () => {
         <div className="p-8 space-y-10">
           <section className="space-y-4">
   <h2 className="text-sm font-black text-gray-400 uppercase tracking-widest">
-    Select Project
+    {t("dashboard.selectProject")}
   </h2>
 
   {/* ✅ THE FIX: Check if projects exist */}
@@ -786,15 +804,15 @@ const Dashboard = () => {
     // --- EMPTY STATE UI ---
     <div className="flex flex-col items-center justify-center p-12 bg-white rounded-3xl border-2 border-dashed border-gray-200">
       <div className="text-4xl mb-4">📂</div>
-      <h2 className="text-xl font-bold text-gray-800">No projects yet</h2>
+      <h2 className="text-xl font-bold text-gray-800">{t("dashboard.emptyTitle")}</h2>
       <p className="text-gray-500 mt-2 text-center max-w-xs">
-        Your security dashboard is empty. Start by scanning your first repository to see AI insights.
+        {t("dashboard.emptyDescription")}
       </p>
       <button 
         className="mt-6 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-100 transition-all"
         onClick={() => navigate("/scan")} // Or wherever your scan page is
       >
-        + Scan Your First Project
+        {t("dashboard.emptyAction")}
       </button>
     </div>
   ) : (
@@ -820,7 +838,7 @@ const Dashboard = () => {
 
           {selectedProject && (
             <section className="space-y-4">
-              <h2 className="text-sm font-black text-gray-400 uppercase tracking-widest">Scan History: {selectedProject.name}</h2>
+              <h2 className="text-sm font-black text-gray-400 uppercase tracking-widest">{t("dashboard.scanHistory", { project: selectedProject.name })}</h2>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {scans.map((scan) => (
                   <div
@@ -842,7 +860,7 @@ const Dashboard = () => {
             <div className="space-y-8">
               {selectedScan && (
                 <section className="space-y-4">
-                  <h2 className="text-sm font-black text-gray-400 uppercase tracking-widest">Detected Issues</h2>
+                  <h2 className="text-sm font-black text-gray-400 uppercase tracking-widest">{t("dashboard.detectedIssues")}</h2>
                   <div className="space-y-4">
                     {groupedIssues.length === 0 ? (
                       <div className="p-6 bg-gray-50 rounded-3xl text-center text-gray-500">No issues found for this scan.</div>
@@ -901,8 +919,8 @@ const Dashboard = () => {
 
               {(aiSuggestions.length > 0 || isAiLoading) && (
                 <section className="p-6 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-3xl shadow-2xl">
-                  <h2 className="text-xl font-black mb-4">✨ AI Insights</h2>
-                  {isAiLoading ? <p className="animate-pulse">Consulting AI...</p> : (
+                  <h2 className="text-xl font-black mb-4">{t("dashboard.aiInsights")}</h2>
+                  {isAiLoading ? <p className="animate-pulse">{t("dashboard.consultingAI")}</p> : (
                     <ul className="space-y-3">
                       {aiSuggestions.map((s, i) => <li key={i} className="text-sm bg-white/10 p-3 rounded-xl">● {s}</li>)}
                     </ul>
@@ -974,8 +992,22 @@ const Dashboard = () => {
 
 // --- MAIN APP ROUTER ---
 function App() {
+  const location = useLocation();
+  const protectedRoutes = [
+    "/dashboard",
+    "/projects",
+    "/teams",
+    "/issue",
+    "/plans",
+    "/profile",
+    "/oauth-success",
+    "/onboarding",
+  ];
+  const showNavbar = !protectedRoutes.some((route) => location.pathname.startsWith(route));
+
   return (
-    <BrowserRouter>
+    <>
+      {showNavbar && <Navbar />}
       <Routes>
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/" element={<Landing />} />
@@ -993,7 +1025,7 @@ function App() {
         <Route path="/profile" element={<Profile />} />
         <Route path="/oauth-success" element={<OAuthSuccess />} />
       </Routes>
-    </BrowserRouter>
+    </>
   );
 }
 

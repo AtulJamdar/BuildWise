@@ -313,6 +313,10 @@ async def get_ai_suggestions(data: dict = Body(...), user_id: int = Depends(get_
         cur.close()
         conn.close()
 
+    language = data.get("language", "en")
+    language_names = {"en": "English", "hi": "Hindi", "mr": "Marathi"}
+    language_name = language_names.get(language, "English")
+
     # Basic AI experience for free users outside trial window
     trial_active = False
     if trial_ends:
@@ -320,18 +324,63 @@ async def get_ai_suggestions(data: dict = Body(...), user_id: int = Depends(get_
             trial_ends = datetime.fromisoformat(trial_ends)
         trial_active = datetime.now(timezone.utc) < trial_ends
 
-    if plan == "free" and not trial_active:
-        return {"suggestions": [
-            "Your free plan includes basic AI suggestions. Upgrade to PRO for advanced guidance.",
-            "Run more scans and fix the first issue to see better recommendations.",
-        ]}
-
-    # --- 🧠 Step 2: Extract Project Data ---
     project_name = data.get("project_name", "Unknown Project")
     issues = data.get("issues", [])
-    
+
+    if plan == "free" and not trial_active:
+        if not issues:
+            no_issue_text = {
+                "en": "No issues found yet. Start a scan to get AI insights!",
+                "hi": "अभी तक कोई मुद्दे नहीं मिले। AI इनसाइट्स के लिए अपना प्रोजेक्ट स्कैन करें!",
+                "mr": "अजून कोणतीही समस्या आढळली नाही. AI इनसाइटसाठी तुमचा प्रोजेक्ट स्कॅन करा!",
+            }
+            return {"suggestions": [no_issue_text.get(language, no_issue_text["en"])]}
+
+        severity_map = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
+        sorted_issues = sorted(
+            issues,
+            key=lambda item: severity_map.get((item.get("severity") or "").upper(), 0),
+            reverse=True,
+        )
+        top_issue = sorted_issues[0]
+        total_issues = len(sorted_issues)
+
+        templates = {
+            "en": {
+                "fix_top_issue": "Start by fixing the most critical issue: {title}.",
+                "review_issues": "Review all {count} issue(s) and prioritize HIGH and MEDIUM severity items.",
+                "rerun_scan": "Once fixed, rerun the scan to receive improved recommendations.",
+            },
+            "hi": {
+                "fix_top_issue": "सबसे महत्वपूर्ण मुद्दे को पहले ठीक करें: {title}.",
+                "review_issues": "सभी {count} मुद्दों की समीक्षा करें और HIGH तथा MEDIUM गंभीरता वाले आइटम पहले ठीक करें.",
+                "rerun_scan": "एक बार ठीक करने के बाद, बेहतर सिफारिशों के लिए स्कैन पुनः चलाएँ.",
+            },
+            "mr": {
+                "fix_top_issue": "सर्वात गंभीर समस्येची दुरुस्ती प्रथम करा: {title}.",
+                "review_issues": "सर्व {count} समस्या तपासा आणि HIGH आणि MEDIUM गंभीरतेच्या आयटमांना प्राधान्य द्या.",
+                "rerun_scan": "एकदा दुरुस्त केल्यावर, सुधारित शिफारसींसाठी पुन्हा स्कॅन चालवा.",
+            },
+        }
+
+        template = templates.get(language, templates["en"])
+        return {
+            "suggestions": [
+                template["fix_top_issue"].format(title=top_issue.get("title", "your top issue")),
+                template["review_issues"].format(count=total_issues),
+                template["rerun_scan"],
+            ]
+        }
+
+    # --- 🧠 Step 2: Extract Project Data ---
     if not issues: 
-        return {"suggestions": ["No issues found yet. Start a scan to get AI insights!"]}
+        return {"suggestions": [
+            {
+                "en": "No issues found yet. Start a scan to get AI insights!",
+                "hi": "अभी तक कोई मुद्दे नहीं मिले। AI इनसाइट्स के लिए अपना प्रोजेक्ट स्कैन करें!",
+                "mr": "अजून कोणतीही समस्या आढळली नाही. AI इनसाइटसाठी तुमचा प्रोजेक्ट स्कॅन करा!",
+            }.get(language, "No issues found yet. Start a scan to get AI insights!")
+        ]}
     
     # Create a compact summary of issues for the AI
     issues_summary = "\n".join([f"- {i['severity']}: {i['title']}" for i in issues[:10]])
@@ -339,6 +388,8 @@ async def get_ai_suggestions(data: dict = Body(...), user_id: int = Depends(get_
     # --- 🧠 Step 3: The Personalized Prompt ---
     prompt = f"""
     You are a senior software architect and mentor. Provide 5 practical suggestions for this project.
+
+    LANGUAGE: Respond in {language_name}.
 
     USER CONTEXT:
     - Role: {role_type}

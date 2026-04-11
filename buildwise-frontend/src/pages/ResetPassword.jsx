@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 
 export default function ResetPassword() {
   const { token } = useParams();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -15,7 +17,7 @@ export default function ResetPassword() {
     setMessage("");
 
     if (!password) {
-      setError("Please enter a new password.");
+      setError(t("resetPassword.invalidPassword"));
       return;
     }
 
@@ -29,14 +31,14 @@ export default function ResetPassword() {
       const data = await response.json();
 
       if (response.ok) {
-        setMessage(data.message || "Password updated successfully.");
+        setMessage(data.message || t("resetPassword.successMessage"));
         setTimeout(() => navigate("/login"), 1500);
       } else {
-        setError(data.detail || "Unable to reset password. Please try again.");
+        setError(data.detail || t("resetPassword.failureMessage"));
       }
     } catch (err) {
       console.error("Reset password error:", err);
-      setError("Server unavailable. Please try again later.");
+      setError(t("resetPassword.serverError"));
     } finally {
       setIsLoading(false);
     }
@@ -45,7 +47,7 @@ export default function ResetPassword() {
   return (
     <div className="flex items-center justify-center min-h-screen bg-gray-100">
       <div className="p-8 bg-white rounded-xl shadow w-full max-w-md">
-        <h2 className="text-2xl font-bold mb-6 text-gray-800">Reset Password</h2>
+        <h2 className="text-2xl font-bold mb-6 text-gray-800">{t("resetPassword.title")}</h2>
 
         {message && (
           <div className="mb-4 p-3 text-sm text-green-700 bg-green-100 rounded">{message}</div>
@@ -57,7 +59,7 @@ export default function ResetPassword() {
         <form onSubmit={handleReset}>
           <input
             type="password"
-            placeholder="New password"
+            placeholder={t("resetPassword.placeholder")}
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -69,11 +71,11 @@ export default function ResetPassword() {
             disabled={isLoading}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded transition-colors font-semibold disabled:opacity-60"
           >
-            {isLoading ? "Updating..." : "Reset Password"}
+            {isLoading ? "Updating..." : t("resetPassword.button")}
           </button>
         </form>
 
-        <p className="mt-4 text-sm text-blue-600 cursor-pointer hover:underline" onClick={() => navigate("/login")}>Back to Login</p>
+        <p className="mt-4 text-sm text-blue-600 cursor-pointer hover:underline" onClick={() => navigate("/login")}>{t("resetPassword.backToLogin")}</p>
       </div>
     </div>
   );

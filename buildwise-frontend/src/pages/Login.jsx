@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 
 export default function Login() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   
   // 1. Setup State to capture inputs
   const [email, setEmail] = useState("");
@@ -28,20 +30,16 @@ export default function Login() {
         localStorage.setItem("token", data.access_token);
         localStorage.setItem("username", data.username || "User");
 
-        // 🧠 THE FIX: Check the flag from the backend
-        // If onboarding_done is true, go to dashboard. Otherwise, go to onboarding.
         if (data.onboarding_done === true) {
           navigate("/dashboard");
         } else {
           navigate("/onboarding");
         }
       } else {
-        // ❌ Error from backend (e.g., 401 Unauthorized)
-        setError(data.detail || "Invalid email or password");
+        setError(data.detail || t("login.invalidError"));
       }
     } catch (err) {
-      // ❌ Server or Network Error
-      setError("Server is offline. Please try again later.");
+      setError(t("login.serverError"));
       console.error("Login Error:", err);
     }
   };
@@ -63,7 +61,7 @@ export default function Login() {
   return (
     <div className="flex items-center justify-center min-h-screen bg-gray-100">
       <div className="p-8 bg-white rounded-xl shadow w-96">
-        <h2 className="text-2xl font-bold mb-6 text-gray-800">Login</h2>
+        <h2 className="text-2xl font-bold mb-6 text-gray-800">{t("login.title")}</h2>
 
         {/* Show error message if login fails */}
         {error && (
@@ -75,7 +73,7 @@ export default function Login() {
         <form onSubmit={handleLogin}>
           <input
             type="email"
-            placeholder="Email"
+            placeholder={t("login.emailPlaceholder")}
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -84,7 +82,7 @@ export default function Login() {
 
           <input
             type="password"
-            placeholder="Password"
+            placeholder={t("login.passwordPlaceholder")}
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -95,20 +93,20 @@ export default function Login() {
             type="submit"
             className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded transition-colors font-semibold"
           >
-            Login
+            {t("login.button")}
           </button>
 
           <button
             onClick={handleGitHubLogin}
             className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-xl hover:bg-black transition-all mt-4 font-bold"
           >
-            <i className="fab fa-github"></i> Login with GitHub
+            <i className="fab fa-github"></i> {t("login.github")}
           </button>
           <button
             onClick={handleGoogleLogin}
             className="w-full flex items-center justify-center gap-2 bg-red-500 text-white py-3 rounded-xl hover:bg-red-600 transition-all mt-3 font-bold"
           >
-            <i className="fab fa-google"></i> Login with Google
+            <i className="fab fa-google"></i> {t("login.google")}
           </button>
         </form>
 
@@ -116,14 +114,14 @@ export default function Login() {
           className="mt-4 text-sm text-blue-600 cursor-pointer hover:underline"
           onClick={() => navigate("/register")}
         >
-          Don’t have an account? Register
+          {t("login.noAccount")}
         </p>
 
         <p
           className="mt-2 text-xs text-gray-400 cursor-pointer hover:underline"
           onClick={() => navigate("/forgot-password")}
         >
-          Forgot password?
+          {t("login.forgotPassword")}
         </p>
       </div>
     </div>

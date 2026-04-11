@@ -1,50 +1,52 @@
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 
 export default function Landing() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   return (
     <div className="min-h-screen bg-black text-white">
       <div className="mx-auto max-w-7xl px-6 py-6">
         <nav className="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-white font-semibold text-xl tracking-tight">BuildWise</div>
+          <div className="text-white font-semibold text-xl tracking-tight">{t("brand")}</div>
           <div className="flex items-center gap-4">
             <button
               onClick={() => navigate("/login")}
               className="text-sm text-gray-400 transition hover:text-white"
             >
-              Login
+              {t("nav.login")}
             </button>
             <button
               onClick={() => navigate("/login")}
               className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition hover:bg-gray-200"
             >
-              Get Started
+              {t("nav.getStarted")}
             </button>
           </div>
         </nav>
 
         <main>
           <section className="mt-20 text-center">
-            <p className="text-sm uppercase tracking-[0.4em] text-gray-500">AI-powered code review for teams</p>
+            <p className="text-sm uppercase tracking-[0.4em] text-gray-500">{t("hero.tagline")}</p>
             <h1 className="mt-6 text-5xl font-semibold leading-tight text-white sm:text-6xl">
-              Review code faster. Ship better.
+              {t("hero.title")}
             </h1>
             <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-gray-400">
-              BuildWise scans your repo, exposes security risk, and delivers precise fixes so engineering teams move with confidence.
+              {t("hero.description")}
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row sm:justify-center">
               <button
                 onClick={() => navigate("/login")}
                 className="rounded-full bg-white px-8 py-3 text-sm font-semibold text-black transition hover:bg-gray-100"
               >
-                Start Scanning →
+                {t("hero.startScanning")}
               </button>
               <button
                 onClick={() => navigate("/plans")}
                 className="rounded-full border border-white/20 px-8 py-3 text-sm font-semibold text-gray-300 transition hover:border-white hover:text-white"
               >
-                View plans
+                {t("hero.viewPlans")}
               </button>
             </div>
 
