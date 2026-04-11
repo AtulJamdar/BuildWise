@@ -73,15 +73,20 @@ def login_user(email, password):
 # --- 👤 PROFILE & RESET LOGIC ---
 
 def generate_reset_token(email):
-    token = str(uuid.uuid4())
-    expiry = datetime.now(timezone.utc) + timedelta(minutes=15)
-
     conn = get_connection()
     cur = conn.cursor()
     try:
+        cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+        user = cur.fetchone()
+        if not user:
+            return None
+
+        token = str(uuid.uuid4())
+        expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+
         cur.execute(
-            "UPDATE users SET reset_token=%s, reset_expiry=%s WHERE email=%s",
-            (token, expiry, email)
+            "INSERT INTO password_resets (email, token, expires_at) VALUES (%s, %s, %s)",
+            (email, token, expiry)
         )
         conn.commit()
         return token
@@ -89,31 +94,34 @@ def generate_reset_token(email):
         cur.close()
         conn.close()
 
+
 def reset_password(token, new_password):
     conn = get_connection()
     cur = conn.cursor()
     try:
         cur.execute(
-            "SELECT id, reset_expiry FROM users WHERE reset_token=%s",
+            "SELECT email, expires_at FROM password_resets WHERE token = %s",
             (token,)
         )
-        user = cur.fetchone()
-
-        if not user or not user[1]:
+        record = cur.fetchone()
+        if not record:
             return False
 
-        # Ensure expiry comparison works
-        expiry = user[1]
-        if expiry.tzinfo is None:
-            expiry = expiry.replace(tzinfo=timezone.utc)
+        email, expires_at = record
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
 
-        if datetime.now(timezone.utc) > expiry:
+        if datetime.now(timezone.utc) > expires_at:
             return False
 
         hashed = hash_password(new_password)
         cur.execute(
-            "UPDATE users SET password=%s, reset_token=NULL, reset_expiry=NULL WHERE id=%s",
-            (hashed, user[0])
+            "UPDATE users SET password = %s WHERE email = %s",
+            (hashed, email)
+        )
+        cur.execute(
+            "DELETE FROM password_resets WHERE token = %s",
+            (token,)
         )
         conn.commit()
         return True

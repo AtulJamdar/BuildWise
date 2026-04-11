@@ -40,3 +40,30 @@ If you did not expect this invite, please ignore this message.
     server.login(EMAIL_SENDER, EMAIL_PASSWORD)
     server.sendmail(EMAIL_SENDER, to_email, msg.as_string())
     server.quit()
+
+
+def send_password_reset_email(to_email: str, reset_link: str):
+    if not EMAIL_SENDER or not EMAIL_PASSWORD:
+        raise ValueError("Email sender credentials are not configured in environment variables.")
+
+    body = f"""
+You requested a password reset for your BuildWise account.
+
+Click the link below to reset your password:
+{reset_link}
+
+If you did not request this change, please ignore this message.
+"""
+
+    msg = MIMEText(body)
+    msg["Subject"] = "BuildWise Password Reset"
+    msg["From"] = EMAIL_SENDER
+    msg["To"] = to_email
+
+    server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+    server.ehlo()
+    server.starttls()
+    server.ehlo()
+    server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+    server.sendmail(EMAIL_SENDER, to_email, msg.as_string())
+    server.quit()

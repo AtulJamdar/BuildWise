@@ -15,7 +15,7 @@ from core.user_service import login_user, register_user, generate_reset_token, r
 from core.team_service import create_team, get_user_teams, add_member_to_team, user_is_team_member, get_team_by_id, get_team_projects as get_team_projects_for_team
 from utils.dependencies import get_current_user
 from utils.token import generate_invite_token
-from utils.email_service import send_invite_email
+from utils.email_service import send_invite_email, send_password_reset_email
 from core.repo_scanner import scan_github_repo
 import requests
 import razorpay
@@ -95,6 +95,16 @@ def ensure_tables_exist():
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS password_resets (
+                id SERIAL PRIMARY KEY,
+                email TEXT NOT NULL,
+                token TEXT NOT NULL UNIQUE,
+                expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+            )
+            """
+        )
         conn.commit()
     finally:
         cur.close()
@@ -161,10 +171,32 @@ def forgot_password(data: dict = Body(...)):
     email = data.get("email")
     if not email:
         raise HTTPException(status_code=400, detail="Email is required")
-        
+
     token = generate_reset_token(email)
-    print(f"Reset token generated: {token}")
-    return {"message": "Reset link sent"}
+    if not token:
+        # Do not reveal whether the email exists for security reasons.
+        return {"message": "If that email exists, a reset link has been sent."}
+
+    reset_link = f"{FRONTEND_URL}/reset-password/{token}"
+    try:
+        send_password_reset_email(email, reset_link)
+    except Exception as exc:
+        print(f"Failed to send password reset email: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to send reset email")
+
+    return {"message": "If that email exists, a reset link has been sent."}
+
+@app.post("/auth/reset-password/{token}")
+def reset_password_with_token(token: str, data: dict = Body(...)):
+    new_password = data.get("password")
+    if not new_password:
+        raise HTTPException(status_code=400, detail="Password is required")
+
+    success = reset_password(token, new_password)
+    if not success:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+
+    return {"message": "Password reset successful"}
 
 @app.post("/auth/reset-password")
 def reset_pw_endpoint(data: dict = Body(...)): 
