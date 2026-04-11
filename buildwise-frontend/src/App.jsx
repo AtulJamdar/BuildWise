@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
+import { Navigate, Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
@@ -16,6 +16,17 @@ import Projects from "./pages/Projects";
 import Teams from "./pages/Teams";
 import Sidebar from "./components/Sidebar";
 import Navbar from "./components/Navbar";
+
+function RequireAuth({ children }) {
+  const location = useLocation();
+  const token = localStorage.getItem("token");
+
+  if (!token) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  return children;
+}
 
 // --- DASHBOARD COMPONENT ---
 // This contains all your logic for projects, scans, and AI
@@ -596,7 +607,12 @@ const Dashboard = () => {
               <p className="text-[10px] text-green-500 font-bold uppercase">{t("dashboard.administrator")}</p>
             </div>
             <button 
-              onClick={() => navigate("/")} 
+              onClick={() => {
+                localStorage.removeItem("token");
+                localStorage.removeItem("username");
+                localStorage.removeItem("gh_token");
+                navigate("/login");
+              }} 
               className="px-4 py-2 bg-red-50 text-red-600 font-bold rounded-lg hover:bg-red-500 hover:text-white transition-all text-sm border border-red-100"
             >
               {t("dashboard.logout")}
@@ -1003,7 +1019,7 @@ function App() {
     "/oauth-success",
     "/onboarding",
   ];
-  const showNavbar = !protectedRoutes.some((route) => location.pathname.startsWith(route));
+  const showNavbar = location.pathname !== "/" && !protectedRoutes.some((route) => location.pathname.startsWith(route));
 
   return (
     <>
@@ -1015,15 +1031,16 @@ function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password/:token" element={<ResetPassword />} />
-        {/* We keep your dashboard on a specific route */}
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/projects" element={<Projects />} />
-        <Route path="/teams" element={<Teams />} />
-        <Route path="/accept-invite/:token" element={<AcceptInvite />} />
-        <Route path="/issue/:id" element={<IssueDetails />} />
-        <Route path="/plans" element={<Plans />} />
-        <Route path="/profile" element={<Profile />} />
+        {/* We keep your dashboard on authenticated routes only */}
+        <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
+        <Route path="/projects" element={<RequireAuth><Projects /></RequireAuth>} />
+        <Route path="/teams" element={<RequireAuth><Teams /></RequireAuth>} />
+        <Route path="/issue/:id" element={<RequireAuth><IssueDetails /></RequireAuth>} />
+        <Route path="/plans" element={<RequireAuth><Plans /></RequireAuth>} />
+        <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
+        <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />
         <Route path="/oauth-success" element={<OAuthSuccess />} />
+        <Route path="/accept-invite/:token" element={<AcceptInvite />} />
       </Routes>
     </>
   );

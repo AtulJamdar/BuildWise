@@ -29,6 +29,93 @@ def register_user(username, email, password, role="user"):
         cur.close()
         conn.close()
 
+def get_user_by_email(email):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id, username, onboarding_done FROM users WHERE email = %s", (email,))
+        return cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def is_username_taken(username):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT 1 FROM users WHERE username = %s", (username,))
+        return cur.fetchone() is not None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def generate_unique_username(preferred_username):
+    username = (preferred_username or "user").strip()
+    if not username:
+        username = "user"
+
+    base_username = username
+    suffix = 1
+    while is_username_taken(username):
+        username = f"{base_username}{suffix}"
+        suffix += 1
+
+    return username
+
+
+def register_oauth_user(username, email, password, role="user"):
+    if get_user_by_email(email):
+        return {"success": False, "message": "User already exists"}
+
+    unique_username = generate_unique_username(username)
+    hashed_pw = hash_password(password)
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            INSERT INTO users (username, email, password, role, onboarding_done, plan, scan_count, scan_limit)
+            VALUES (%s, %s, %s, %s, FALSE, 'free', 0, 10)
+            """,
+            (unique_username, email, hashed_pw, role)
+        )
+        conn.commit()
+        return {"success": True, "message": "User registered successfully", "username": unique_username}
+    except Exception as e:
+        print(f"OAuth Registration Error: {e}")
+        return {"success": False, "message": "Registration failed. Check logs."}
+    finally:
+        cur.close()
+        conn.close()
+
+
+def oauth_login_user(email):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id, username, onboarding_done FROM users WHERE email = %s", (email,))
+        user = cur.fetchone()
+        if not user:
+            print(f"❌ OAuth login failed: User with email {email} not found.")
+            return None
+
+        token = create_access_token({"user_id": user[0], "username": user[1]})
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "onboarding_done": bool(user[2]),
+            "username": user[1]
+        }
+    except Exception as e:
+        print(f"🔥 OAuth login error: {e}")
+        return None
+    finally:
+        cur.close()
+        conn.close()
+
 def login_user(email, password):
     """
     Verifies credentials and returns a JWT access token plus onboarding status.

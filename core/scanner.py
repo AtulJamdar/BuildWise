@@ -1,5 +1,6 @@
 import os
 import uuid
+import hashlib
 from core.rules_engine import run_all_checks
 from core.report import generate_report
 from core.report_service import save_report
@@ -7,7 +8,29 @@ from core.js_analyzer import build_dependency_graph, find_used_files, normalize_
 from core.constants import SAFE_FILES, ENTRY_FILES, LOGIC_EXTENSIONS
 
 
-def scan_project(path, project_name, user_id, repo_url=None, team_id=None):
+def extract_issue_context(file_path, line_number, context_lines=2):
+    if not file_path or not line_number:
+        return None, None
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+
+        index = max(0, line_number - 1)
+        before = [l.rstrip("\n") for l in lines[max(0, index - context_lines):index]]
+        after = [l.rstrip("\n") for l in lines[index + 1: index + 1 + context_lines]]
+
+        return before, after
+    except Exception:
+        return None, None
+
+
+def generate_issue_fingerprint(file, line, code):
+    raw = f"{file}:{line}:{code}"
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
+
+def scan_project(path, project_name, user_id, repo_url=None, team_id=None, repo_branch=None, commit_sha=None):
     print(f"🚀 [SCANNER] Starting deep analysis: {project_name}")
 
     scan_id = None
@@ -90,11 +113,52 @@ def scan_project(path, project_name, user_id, repo_url=None, team_id=None):
             for issue in issues:
                 if "id" not in issue:
                     issue["id"] = str(uuid.uuid4())
+
+                raw_file = issue.get("file", path_key)
+                abs_file_path = raw_file
+                if not os.path.isabs(raw_file):
+                    abs_file_path = os.path.abspath(os.path.join(abs_project_path, raw_file))
+
+                if repo_url:
+                    try:
+                        issue["repo_path"] = os.path.relpath(abs_file_path, abs_project_path).replace(os.sep, "/")
+                    except Exception:
+                        issue["repo_path"] = raw_file.replace("\\", "/")
+                else:
+                    issue["repo_path"] = raw_file.replace("\\", "/")
+
+                if issue.get("line") and os.path.exists(abs_file_path):
+                    before, after = extract_issue_context(abs_file_path, issue.get("line"))
+                    if before is not None:
+                        issue["context_before"] = before
+                    if after is not None:
+                        issue["context_after"] = after
+
+                if "fingerprint" not in issue:
+                    fingerprint_file = issue.get("repo_path", raw_file)
+                    fingerprint_line = issue.get("line") or 0
+                    fingerprint_code = issue.get("code") or issue.get("title") or issue.get("type") or ""
+                    issue["fingerprint"] = generate_issue_fingerprint(
+                        fingerprint_file,
+                        fingerprint_line,
+                        fingerprint_code,
+                    )
+
                 final_results.append(issue)
 
         # 4. Finalize and Save
         score, summary = generate_report(final_results)
-        scan_id = save_report(project_name, score, summary, final_results, user_id, repo_url, team_id)
+        scan_id = save_report(
+            project_name,
+            score,
+            summary,
+            final_results,
+            user_id,
+            repo_url,
+            team_id,
+            repo_branch=repo_branch,
+            commit_sha=commit_sha,
+        )
 
         return {
             "status": "success",

@@ -97,12 +97,14 @@ export default function Login() {
           </button>
 
           <button
+            type="button"
             onClick={handleGitHubLogin}
             className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-xl hover:bg-black transition-all mt-4 font-bold"
           >
             <i className="fab fa-github"></i> {t("login.github")}
           </button>
           <button
+            type="button"
             onClick={handleGoogleLogin}
             className="w-full flex items-center justify-center gap-2 bg-red-500 text-white py-3 rounded-xl hover:bg-red-600 transition-all mt-3 font-bold"
           >

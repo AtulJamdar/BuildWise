@@ -1,10 +1,9 @@
 import os
 import shutil
 import stat
-import time
+import subprocess
 import tempfile
 from urllib.parse import quote_plus
-from git import Repo
 from core.scanner import scan_project
 
 # Helper function to fix read-only files on Windows (Required for .git folders)
@@ -25,20 +24,66 @@ def scan_github_repo(repo_url, user_id, gh_token=None, team_id=None):
         # 1. Extract Project Name
         suggested_name = repo_url.split("/")[-1].replace(".git", "")
         print(f"📁 Project name: {suggested_name}")
-        
+
+        gh_token = gh_token or os.getenv("GITHUB_API_TOKEN")
         # 2. Clone the Repository
         clone_url = repo_url
-        if gh_token and repo_url.startswith("https://"):
+        if gh_token:
             safe_token = quote_plus(gh_token)
-            clone_url = repo_url.replace("https://", f"https://{safe_token}@")
+            if repo_url.startswith("https://"):
+                clone_url = repo_url.replace("https://", f"https://{safe_token}@")
+            elif repo_url.startswith("git@github.com:"):
+                repo_path = repo_url.split(":", 1)[1]
+                clone_url = f"https://{safe_token}@github.com/{repo_path}"
             print("🔐 Using GitHub token for private repo clone")
 
         print(f"🔄 Cloning repository from {clone_url} to {temp_dir}")
-        Repo.clone_from(clone_url, temp_dir)
-        print(f"✅ Clone complete. Starting scan for User ID: {user_id}")
+        try:
+            clone_proc = subprocess.run(
+                ["git", "clone", "--depth", "1", clone_url, temp_dir],
+                check=True,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            )
+            print(f"✅ Clone complete. Starting scan for User ID: {user_id}")
+        except subprocess.CalledProcessError as e:
+            raise Exception(f"Git clone failed: {e.stderr.strip() or e.stdout.strip() or str(e)}")
+
+        current_branch = None
+        try:
+            branch_proc = subprocess.run(
+                ["git", "-C", temp_dir, "rev-parse", "--abbrev-ref", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            current_branch = branch_proc.stdout.strip()
+        except Exception:
+            current_branch = None
+
+        commit_sha = None
+        try:
+            sha_proc = subprocess.run(
+                ["git", "-C", temp_dir, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            commit_sha = sha_proc.stdout.strip()
+        except Exception:
+            commit_sha = None
 
         # 3. Trigger the actual scan logic
-        scan_result = scan_project(temp_dir, suggested_name, user_id, repo_url, team_id=team_id)
+        scan_result = scan_project(
+            temp_dir,
+            suggested_name,
+            user_id,
+            repo_url,
+            team_id=team_id,
+            repo_branch=current_branch,
+            commit_sha=commit_sha,
+        )
         print(f"📊 Scan result: {scan_result}")
 
         return scan_result
@@ -52,17 +97,13 @@ def scan_github_repo(repo_url, user_id, gh_token=None, team_id=None):
         # 5. Cleanup - IMPORTANT to release disk space
         try:
             if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir, onexc=remove_readonly)
+                shutil.rmtree(temp_dir, onerror=remove_readonly)
                 print(f"🗑️ Cleaned up temp dir: {temp_dir}")
         except Exception as cleanup_error:
             print(f"⚠️ Cleanup warning: {cleanup_error}")
         if os.path.exists(temp_dir):
             print(f"🧹 Cleaning up temp files: {temp_dir}")
             try:
-                # Try both naming conventions for Windows compatibility
-                shutil.rmtree(temp_dir, onexc=remove_readonly)
-            except:
-                try:
-                    shutil.rmtree(temp_dir, onerror=remove_readonly)
-                except Exception as cleanup_error:
-                    print(f"⚠️ Cleanup failed: {cleanup_error}")
+                shutil.rmtree(temp_dir, onerror=remove_readonly)
+            except Exception as cleanup_error:
+                print(f"⚠️ Cleanup failed: {cleanup_error}")

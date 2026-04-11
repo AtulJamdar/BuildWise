@@ -1,6 +1,8 @@
 import base64
 import os
+import re
 import json
+from difflib import SequenceMatcher
 from fastapi import FastAPI, Body, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
@@ -9,9 +11,9 @@ from db.connection import get_connection
 from core.project_service import get_or_create_project, get_user_projects, get_project_scans, verify_project_access, verify_issue_access, verify_scan_access
 
 # Import your local services
-from core.issue_service import get_scan_issues, get_issue_by_id, update_issue_status
+from core.issue_service import get_scan_issues, get_issue_by_id, get_issue_repo_info, update_issue_status, assign_issue, get_issue_activity
 from core.scanner import scan_project
-from core.user_service import login_user, register_user, generate_reset_token, reset_password, get_user_plan_info, increment_scan_count
+from core.user_service import login_user, oauth_login_user, register_user, register_oauth_user, get_user_by_email, generate_reset_token, reset_password, get_user_plan_info, increment_scan_count
 from core.team_service import create_team, get_user_teams, add_member_to_team, user_is_team_member, get_team_by_id, get_team_projects as get_team_projects_for_team
 from utils.dependencies import get_current_user
 from utils.token import generate_invite_token
@@ -54,6 +56,7 @@ requests.auth._basic_auth_str = _basic_auth_str_utf8
 
 razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 BACKEND_URL = get_env("BACKEND_URL", "http://localhost:8000")
+GITHUB_REDIRECT_URI = get_env("GITHUB_REDIRECT_URI", f"{BACKEND_URL}/auth/github/callback")
 GOOGLE_REDIRECT_URI = get_env("GOOGLE_REDIRECT_URI", f"{BACKEND_URL}/auth/google/callback")
 FRONTEND_URL = get_env("FRONTEND_URL", "http://localhost:5173")
 
@@ -71,10 +74,17 @@ app = FastAPI(title="BuildWise API")
 # --- CORS Configuration ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
-    allow_credentials=False,
+    allow_origins=[
+        FRONTEND_URL,
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
@@ -105,6 +115,84 @@ def ensure_tables_exist():
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS projects (
+                id SERIAL PRIMARY KEY,
+                project_name TEXT,
+                user_id INT,
+                repo_url TEXT,
+                team_id INT
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS reports (
+                id SERIAL PRIMARY KEY,
+                project_id INT,
+                score INT,
+                summary TEXT,
+                commit_sha TEXT,
+                branch TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS issues (
+                id SERIAL PRIMARY KEY,
+                project_id INT,
+                scan_id INT,
+                fingerprint TEXT,
+                file TEXT,
+                repo_path TEXT,
+                line INT,
+                code TEXT,
+                type TEXT,
+                severity TEXT,
+                title TEXT,
+                why TEXT,
+                fix TEXT,
+                status TEXT DEFAULT 'OPEN',
+                note TEXT,
+                context_before TEXT,
+                context_after TEXT,
+                assigned_to INT,
+                updated_by INT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                last_seen_at TIMESTAMP DEFAULT NOW()
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS issue_activity (
+                id SERIAL PRIMARY KEY,
+                issue_id INT,
+                action TEXT,
+                user_id INT,
+                details TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """
+        )
+        cur.execute("ALTER TABLE issue_activity ADD COLUMN IF NOT EXISTS details TEXT")
+        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS project_id INT")
+        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS fingerprint TEXT")
+        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS code TEXT")
+        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS note TEXT")
+        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS assigned_to INT")
+        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS updated_by INT")
+        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP DEFAULT NOW()")
+        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS context_before TEXT")
+        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS context_after TEXT")
+        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS repo_path TEXT")
+        cur.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS repo_url TEXT")
+        cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS commit_sha TEXT")
+        cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS branch TEXT")
         conn.commit()
     finally:
         cur.close()
@@ -165,6 +253,144 @@ def get_auth_status(user_id: int = Depends(get_current_user)):
     finally:
         cur.close()
         conn.close()
+
+
+def parse_github_repo_url(repo_url: str):
+    if not repo_url:
+        return None
+
+    if repo_url.startswith("git@github.com:"):
+        repo_path = repo_url.split(":", 1)[1]
+    elif "github.com/" in repo_url:
+        repo_path = repo_url.split("github.com/", 1)[1]
+    else:
+        return None
+
+    if repo_path.endswith(".git"):
+        repo_path = repo_path[:-4]
+
+    repo_path = repo_path.strip("/\n")
+    parts = repo_path.split("/")
+    if len(parts) < 2:
+        return None
+
+    return parts[0], parts[1]
+
+
+def fetch_github_file_lines(owner: str, repo: str, file_path: str, ref: str = None):
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    github_token = os.getenv("GITHUB_API_TOKEN")
+    if github_token:
+        headers["Authorization"] = f"token {github_token}"
+
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
+    if ref:
+        url += f"?ref={ref}"
+
+    response = requests.get(url, headers=headers)
+    if response.status_code == 404:
+        raise HTTPException(status_code=404, detail=f"GitHub file not found: {file_path}")
+    response.raise_for_status()
+
+    data = response.json()
+    content = data.get("content")
+    if not content:
+        raise HTTPException(status_code=500, detail="GitHub response missing file content")
+
+    decoded = base64.b64decode(content).decode("utf-8", errors="ignore")
+    return decoded.splitlines()
+
+
+def normalize_code(text):
+    return " ".join((text or "").strip().split())
+
+
+def find_best_match(lines, issue):
+    target = normalize_code(issue.get("code"))
+    if not target:
+        return None
+
+    normalized_lines = [normalize_code(line) for line in lines]
+    for i, normalized_line in enumerate(normalized_lines):
+        if normalized_line == target:
+            return i + 1
+    return None
+
+
+def fuzzy_match(lines, issue):
+    target = normalize_code(issue.get("code"))
+    if not target:
+        return None
+
+    best_score = 0.0
+    best_line = None
+    for i, line in enumerate(lines):
+        score = SequenceMatcher(None, normalize_code(line), target).ratio()
+        if score > best_score:
+            best_score = score
+            best_line = i + 1
+
+    return best_line if best_score >= 0.72 else None
+
+
+def get_snippet(lines, line_no):
+    start = max(0, line_no - 3)
+    end = min(len(lines), line_no + 2)
+    return "\n".join(lines[start:end])
+
+
+def smart_match(lines, issue):
+    line_no = find_best_match(lines, issue)
+    if line_no:
+        return line_no
+
+    return fuzzy_match(lines, issue)
+
+
+@app.get("/issues/{issue_id}/github-match")
+def github_match_issue(issue_id: int, user_id: int = Depends(get_current_user)):
+    if not verify_issue_access(issue_id, user_id):
+        raise HTTPException(status_code=403, detail="Access denied to this issue")
+
+    issue = get_issue_by_id(issue_id)
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    repo_info = get_issue_repo_info(issue_id)
+    if not repo_info:
+        raise HTTPException(status_code=400, detail="Repo info unavailable for this issue")
+
+    repo_url, commit_sha, branch, repo_path = repo_info
+    if not repo_url or not repo_path:
+        raise HTTPException(status_code=400, detail="Missing repository URL or file path for GitHub matching")
+
+    parsed = parse_github_repo_url(repo_url)
+    if not parsed:
+        raise HTTPException(status_code=400, detail="Unsupported GitHub repo URL")
+
+    owner, repo_name = parsed
+    lines = fetch_github_file_lines(owner, repo_name, repo_path, ref=branch)
+
+    exact_line = smart_match(lines, {
+        "code": issue[3],
+        "context_before": issue[16],
+        "context_after": issue[17],
+    })
+
+    matched = exact_line is not None
+    matched_snippet = get_snippet(lines, exact_line) if matched else None
+
+    return {
+        "issue_id": issue_id,
+        "repo_path": repo_path,
+        "commit_sha": commit_sha,
+        "branch": branch,
+        "exact_line": exact_line,
+        "matched": matched,
+        "matched_snippet": matched_snippet,
+        "lines_preview": lines[:6],
+    }
+
 
 @app.post("/auth/forgot-password")
 def forgot_password(data: dict = Body(...)):
@@ -254,7 +480,18 @@ def get_issues(scan_id: int, user_id: int = Depends(get_current_user)):
     if not verify_scan_access(scan_id, user_id):
         raise HTTPException(status_code=403, detail="Access denied to this scan")
     issues = get_scan_issues(scan_id)
-    return [{"id": i[0], "file": i[1], "severity": i[2], "title": i[3], "status": i[4]} for i in issues]
+    return [
+        {
+            "id": i[0],
+            "file": i[1],
+            "severity": i[2],
+            "title": i[3],
+            "status": i[4],
+            "note": i[5],
+            "assigned_to": i[6],
+        }
+        for i in issues
+    ]
 
 @app.get("/issues/{issue_id}")
 def get_issue(issue_id: int, user_id: int = Depends(get_current_user)):
@@ -263,17 +500,31 @@ def get_issue(issue_id: int, user_id: int = Depends(get_current_user)):
     issue = get_issue_by_id(issue_id)
     if not issue: 
         raise HTTPException(status_code=404, detail="Issue not found")
-    print(f"📝 Fetching issue {issue_id}: File={issue[1]}, Line={issue[2]}, Title={issue[5]}")
+    print(f"📝 Fetching issue {issue_id}: File={issue[1]}, Line={issue[2]}, Title={issue[6]}")
+    activity = get_issue_activity(issue_id)
     return {
         "id": issue[0], 
         "file": issue[1], 
         "line": issue[2], 
-        "type": issue[3],
-        "severity": issue[4], 
-        "title": issue[5], 
-        "why": issue[6], 
-        "fix": issue[7], 
-        "status": issue[8]
+        "code": issue[3],
+        "type": issue[4],
+        "severity": issue[5], 
+        "title": issue[6], 
+        "why": issue[7], 
+        "fix": issue[8], 
+        "status": issue[9],
+        "note": issue[10],
+        "assigned_to": issue[11],
+        "assigned_to_name": issue[12],
+        "updated_by": issue[13],
+        "updated_by_name": issue[14],
+        "fingerprint": issue[15],
+        "context_before": issue[16],
+        "context_after": issue[17],
+        "repo_path": issue[18],
+        "activity": [
+            {"action": a[0], "details": a[1], "created_at": str(a[2]), "user": a[3]} for a in activity
+        ]
     }
 
 @app.put("/issues/{issue_id}")
@@ -283,8 +534,20 @@ def update_issue(issue_id: int, data: dict = Body(...), user_id: int = Depends(g
     status_val = data.get("status")
     if status_val not in ["OPEN", "FIXED", "IGNORED"]:
         raise HTTPException(status_code=400, detail="Invalid status")
-    update_issue_status(issue_id, status_val)
+    update_issue_status(issue_id, status_val, user_id)
     return {"message": "Updated"}
+
+@app.post("/issues/{issue_id}/assign")
+def assign_issue_endpoint(issue_id: int, data: dict = Body(...), user_id: int = Depends(get_current_user)):
+    if not verify_issue_access(issue_id, user_id):
+        raise HTTPException(status_code=403, detail="Access denied to this issue")
+
+    assignee_id = data.get("user_id")
+    if not assignee_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    assign_issue(issue_id, assignee_id, user_id)
+    return {"message": "Assigned"}
 
 # --- 🧠 AI SUGGESTIONS ---
 
@@ -787,7 +1050,7 @@ def update_profile(
 @app.post("/scan")
 async def run_security_scan(data: dict = Body(...), user_id: int = Depends(get_current_user)):
     repo_url = data.get("repo_url")
-    gh_token = data.get("gh_token")
+    gh_token = data.get("gh_token") or os.getenv("GITHUB_API_TOKEN")
     team_id = data.get("team_id")
 
     if not repo_url:
@@ -823,12 +1086,17 @@ async def run_security_scan(data: dict = Body(...), user_id: int = Depends(get_c
             project_name = repo_url.split("/")[-1]
             result = scan_project(repo_url, project_name, user_id, repo_url, team_id=team_id)
 
-        if result.get("status") == "success":
-            increment_scan_count(user_id)
+        if result.get("status") != "success":
+            print(f"❌ Scan failed: {result}")
+            raise HTTPException(status_code=500, detail=result.get("error") or "Scan failed")
+
+        increment_scan_count(user_id)
 
         print(f"✅ Scan completed successfully: {result}")
         return {"message": "Scan completed successfully", "details": result}
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Scan Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -929,12 +1197,8 @@ async def google_callback(request: Request):
     if not email:
         raise HTTPException(status_code=400, detail="Google did not return an email")
 
-    try:
-        register_user(name, email, "google_user")
-    except Exception:
-        pass
-
-    auth_data = login_user(email, "google_user")
+    register_user(name, email, "google_user")
+    auth_data = oauth_login_user(email)
     if auth_data and "access_token" in auth_data:
         app_token = auth_data.get("access_token")
     else:
@@ -946,8 +1210,9 @@ async def google_callback(request: Request):
 @app.get("/auth/github")
 def github_login():
     client_id = os.getenv("GITHUB_CLIENT_ID")
+    redirect_uri = GITHUB_REDIRECT_URI
     # Request access to repo scope so private repositories can be listed and cloned
-    url = f"https://github.com/login/oauth/authorize?client_id={client_id}&scope=repo%20user:email"
+    url = f"https://github.com/login/oauth/authorize?client_id={client_id}&redirect_uri={redirect_uri}&scope=repo%20user:email"
     return {"url": url}
 
 @app.get("/auth/github/callback")
@@ -981,15 +1246,15 @@ def github_callback(code: str):
     email = user_data.get("email") or f"{user_data.get('login')}@github.com"
     name = user_data.get("name") or user_data.get("login")
 
-    # 3. Register or Login the user in our DB
-    # We wrap registration in a try/except to ignore "User already exists" errors
-    try:
-        register_user(name, email, "github_oauth_dummy_pass")
-    except Exception as e:
-        print(f"User check: {name} is already in the database.")
+    # 3. Register the user if they do not already exist.
+    user_exists = get_user_by_email(email)
+    if not user_exists:
+        result = register_oauth_user(name, email, "github_oauth_dummy_pass")
+        if not result.get("success"):
+            print(f"OAuth user creation warning: {result.get('message')}")
 
-    # 4. Generate our BUILDWISE app JWT token
-    auth_data = login_user(email, "github_oauth_dummy_pass")
+    # 4. Generate our BUILDWISE app JWT token without requiring the password if the user already exists.
+    auth_data = oauth_login_user(email)
     
     if auth_data and "access_token" in auth_data:
         app_token = auth_data.get("access_token")
@@ -1001,11 +1266,15 @@ def github_callback(code: str):
     )
 
 @app.get("/github/repos")
-def get_github_repos(token: str):
+def get_github_repos(token: str = None):
     """
     Fetches the list of repositories for the authenticated GitHub user.
     """
-    # Note: 'token' here is the GITHUB access token, not our app JWT
+    # Note: 'token' here is the GitHub access token, not our app JWT
+    token = token or os.getenv("GITHUB_API_TOKEN")
+    if not token:
+        return []
+
     headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
     
     try:
