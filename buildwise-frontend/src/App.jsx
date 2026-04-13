@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, Routes, Route, useNavigate, useLocation } from "react-router-dom";
+import { Navigate, Routes, Route, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
@@ -578,9 +578,7 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="flex min-h-screen bg-gray-100 font-sans">
-      <Sidebar />
-      <main className="flex-1 flex flex-col h-screen overflow-y-auto">
+      <main className="h-screen flex flex-col overflow-y-auto">
         <header className="flex flex-wrap justify-between items-center bg-white px-8 py-4 shadow-sm border-b sticky top-0 z-10">
           <div>
             <h1 className="text-xl font-bold text-gray-800">{t("dashboard.overview")}</h1>
@@ -1002,11 +1000,23 @@ const Dashboard = () => {
           </div>
         </div>
       </main>
-    </div>
   );
 };
 
 // --- MAIN APP ROUTER ---
+function ProtectedLayout() {
+  return (
+    <div className="flex min-h-screen bg-gray-100">
+      <div className="w-64 h-screen fixed left-0 top-0">
+        <Sidebar />
+      </div>
+      <div className="ml-64 w-full min-h-screen overflow-y-auto">
+        <Outlet />
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const location = useLocation();
   const protectedRoutes = [
@@ -1032,13 +1042,14 @@ function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password/:token" element={<ResetPassword />} />
         {/* We keep your dashboard on authenticated routes only */}
-        <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
-        <Route path="/projects" element={<RequireAuth><Projects /></RequireAuth>} />
-        <Route path="/teams" element={<RequireAuth><Teams /></RequireAuth>} />
-        <Route path="/issue/:id" element={<RequireAuth><IssueDetails /></RequireAuth>} />
-        <Route path="/plans" element={<RequireAuth><Plans /></RequireAuth>} />
-        <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
-        <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />
+        <Route element={<RequireAuth><ProtectedLayout /></RequireAuth>}>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/projects" element={<Projects />} />
+          <Route path="/teams" element={<Teams />} />
+          <Route path="/issue/:id" element={<IssueDetails />} />
+          <Route path="/plans" element={<Plans />} />
+          <Route path="/profile" element={<Profile />} />
+        </Route>
         <Route path="/oauth-success" element={<OAuthSuccess />} />
         <Route path="/accept-invite/:token" element={<AcceptInvite />} />
       </Routes>

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import Sidebar from "../components/Sidebar";
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -94,9 +93,7 @@ export default function Profile() {
   }
 
   return (
-    <div className="flex min-h-screen bg-gray-100 font-sans">
-      <Sidebar />
-      <main className="flex-1 flex flex-col h-screen overflow-y-auto">
+      <main className="min-h-screen bg-gray-100 flex flex-col h-screen overflow-y-auto">
         <header className="flex justify-between items-center bg-white px-8 py-4 shadow-sm border-b sticky top-0 z-10">
           <h1 className="text-xl font-bold text-gray-800">Profile Settings</h1>
           <div className="flex items-center gap-4">
@@ -251,6 +248,5 @@ export default function Profile() {
           </div>
         </div>
       </main>
-    </div>
   );
 }

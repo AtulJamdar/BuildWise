@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import Sidebar from "../components/Sidebar";
 
 export default function Plans() {
   const navigate = useNavigate();
@@ -130,9 +129,7 @@ export default function Plans() {
   };
 
   return (
-    <div className="flex min-h-screen bg-gray-100 font-sans">
-      <Sidebar />
-      <main className="flex-1 p-6">
+      <main className="min-h-screen bg-gray-100 p-6">
         <div className="max-w-6xl mx-auto">
           {/* Header Section */}
           <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -203,7 +200,7 @@ export default function Plans() {
             </div>
           </div>
         </div> {/* Close max-w-6xl */}
-      </main> {/* Close flex-1 */}
-    </div> 
+        {/* Close flex-1 */}
+      </main> 
   );
 }

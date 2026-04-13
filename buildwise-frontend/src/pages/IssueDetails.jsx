@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import Sidebar from "../components/Sidebar";
 
 export default function IssueDetails() {
   const { id } = useParams();
@@ -200,9 +199,7 @@ export default function IssueDetails() {
 
   if (error) {
     return (
-      <div className="flex min-h-screen bg-gray-100 font-sans">
-        <Sidebar />
-        <main className="flex-1 p-6">
+      <main className="min-h-screen bg-gray-100 p-6">
           <div className="p-6 max-w-3xl mx-auto mt-10 bg-white rounded-3xl shadow-lg">
         <button
           onClick={() => navigate(-1)}
@@ -213,29 +210,23 @@ export default function IssueDetails() {
         <h1 className="text-xl font-bold text-red-600">Issue details unavailable</h1>
         <p className="mt-3 text-gray-600">{error}</p>
       </div>
-        </main>
-      </div>
+      </main>
     );
   }
 
   if (!issue) {
     return (
-      <div className="flex min-h-screen bg-gray-100 font-sans">
-        <Sidebar />
-        <main className="flex-1 p-6 flex items-center justify-center bg-gray-50">
+      <main className="min-h-screen bg-gray-100 p-6 flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-100 border-t-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading issue details…</p>
         </div>
       </main>
-    </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-gray-100 font-sans">
-      <Sidebar />
-      <main className="flex-1 p-6">
+      <main className="min-h-screen bg-gray-100 p-6">
       <button
         onClick={() => navigate(-1)}
         className="mb-6 text-sm font-semibold text-blue-600 hover:underline"
@@ -474,7 +465,6 @@ export default function IssueDetails() {
           </div>
         )}
       </div>
-      </main>
-    </div>
+    </main>
   );
 }
