@@ -7,6 +7,11 @@ from core.constants import SAFE_FILES, ENTRY_FILES, LOGIC_EXTENSIONS
 
 # Standard folders to ignore across all rules
 IGNORE_FOLDERS = {'.git', 'node_modules', '__pycache__', 'venv', '.vscode'}
+BINARY_FILE_EXTENSIONS = {
+    '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.svg',
+    '.zip', '.tar', '.gz', '.7z', '.woff', '.woff2', '.eot', '.ttf',
+    '.otf', '.mp3', '.mp4', '.mov', '.avi', '.exe', '.dll'
+}
 
 # Rule 1: README check
 def check_readme(path):
@@ -148,7 +153,17 @@ def is_sensitive_name(name):
 
 def extract_string_literals(content):
     pattern = re.compile(r'(["\'])(?P<value>[^"\']{20,}?)\1')
-    return [match.group('value') for match in pattern.finditer(content)]
+    results = []
+    for match in pattern.finditer(content):
+        value = match.group('value')
+        line_no = content.count('\n', 0, match.start()) + 1
+        results.append((value, line_no))
+    return results
+
+
+def is_binary_path(file_path):
+    _, ext = os.path.splitext(file_path.lower())
+    return ext in BINARY_FILE_EXTENSIONS
 
 
 def check_entropy_strings(path):
@@ -158,18 +173,21 @@ def check_entropy_strings(path):
         for file in files:
             full_path = os.path.join(root, file)
             rel_path = os.path.relpath(full_path, path)
+            if is_binary_path(full_path):
+                continue
             try:
                 with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read()
             except Exception:
                 continue
-            for candidate in extract_string_literals(content):
+            for candidate, line_no in extract_string_literals(content):
                 if is_likely_secret_string(candidate):
                     issues.append({
                         'type': 'SECURITY',
                         'severity': 'HIGH',
                         'file': rel_path,
-                        'line': None,
+                        'line': line_no,
+                        'code': candidate,
                         'title': 'High entropy string detected',
                         'why': 'This quoted string has high randomness and may be a secret or API key.',
                         'fix': 'Move secrets into environment variables and rotate any exposed keys.'

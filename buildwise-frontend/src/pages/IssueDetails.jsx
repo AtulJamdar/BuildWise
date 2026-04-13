@@ -10,6 +10,12 @@ export default function IssueDetails() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [githubMatch, setGithubMatch] = useState(null);
   const [matchError, setMatchError] = useState("");
+  const [fixPreview, setFixPreview] = useState(null);
+  const [fixPreviewError, setFixPreviewError] = useState("");
+  const [matchCandidates, setMatchCandidates] = useState([]);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [isApplyingFix, setIsApplyingFix] = useState(false);
+  const [prResult, setPrResult] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -79,6 +85,84 @@ export default function IssueDetails() {
       fetchMatch();
     }
   }, [issue]);
+
+  const previewFix = async () => {
+    if (!issue) return;
+    setFixPreview(null);
+    setFixPreviewError("");
+    setMatchCandidates([]);
+    setPrResult(null);
+    setIsPreviewing(true);
+
+    try {
+      const token = localStorage.getItem("token");
+      const ghToken = localStorage.getItem("gh_token");
+      if (!token) {
+        navigate("/login");
+        return;
+      }
+
+      const res = await fetch(`http://localhost:8000/issues/${issue.id}/fix-preview`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ gh_token: ghToken }),
+      });
+
+      const data = await res.json();
+      console.log("fix-preview response", data);
+      if (!res.ok) {
+        throw new Error(data.detail || data.message || "Unable to preview fix.");
+      }
+
+      if (data.candidates && data.candidates.length > 1) {
+        setMatchCandidates(data.candidates);
+        setFixPreviewError("Multiple candidate matches found. Please rescan or choose the correct match.");
+      } else {
+        setFixPreview(data);
+      }
+    } catch (err) {
+      setFixPreviewError(err.message || "Unable to generate fix preview.");
+    } finally {
+      setIsPreviewing(false);
+    }
+  };
+
+  const applyFix = async () => {
+    if (!issue) return;
+    setIsApplyingFix(true);
+    setPrResult(null);
+    setFixPreviewError("");
+
+    try {
+      const token = localStorage.getItem("token");
+      const ghToken = localStorage.getItem("gh_token");
+      if (!token) {
+        navigate("/login");
+        return;
+      }
+
+      const res = await fetch(`http://localhost:8000/issues/${issue.id}/apply-fix`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ gh_token: ghToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || data.message || "Unable to create PR.");
+      }
+      setPrResult(data);
+    } catch (err) {
+      setFixPreviewError(err.message || "Unable to apply fix.");
+    } finally {
+      setIsApplyingFix(false);
+    }
+  };
 
   const updateStatus = async (newStatus) => {
     const token = localStorage.getItem("token");
@@ -191,11 +275,14 @@ export default function IssueDetails() {
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           <div className="space-y-2 p-5 rounded-3xl bg-slate-50 border border-slate-100">
             <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">File</p>
-            <p className="text-sm font-semibold text-gray-900 break-all">{issue.file || "Unknown"}</p>
+            <p className="text-sm font-semibold text-gray-900 break-all">{issue.repo_path || issue.file || "Unknown"}</p>
           </div>
           <div className="space-y-2 p-5 rounded-3xl bg-slate-50 border border-slate-100">
             <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Location</p>
-            <p className="text-sm font-semibold text-gray-900">Line {issue.line || "N/A"}</p>
+            <p className="text-sm font-semibold text-gray-900">
+              Line {issue.line || "N/A"}
+              {githubMatch?.branch ? ` • branch ${githubMatch.branch}` : ""}
+            </p>
           </div>
         </div>
 
@@ -207,13 +294,8 @@ export default function IssueDetails() {
             </pre>
           )}
           <pre className="mt-3 bg-red-50 rounded-3xl p-4 text-sm text-red-800 overflow-x-auto whitespace-pre-wrap break-words">
-            {issue.code || "No code snippet available."}
+            {issue.code || issue.code_snippet || githubMatch?.matched_snippet || "No code snippet available."}
           </pre>
-          {issue.context_after && issue.context_after.length > 0 && (
-            <pre className="mt-3 bg-slate-50 rounded-3xl p-4 text-sm text-gray-700 overflow-x-auto whitespace-pre-wrap break-words">
-              {issue.context_after.join("\n")}
-            </pre>
-          )}
         </div>
 
         <div className="mt-6">
@@ -221,6 +303,9 @@ export default function IssueDetails() {
           <pre className="mt-3 bg-green-50 rounded-3xl p-4 text-sm text-green-900 overflow-x-auto whitespace-pre-wrap break-words">
             {issue.fix || "No suggested fix available."}
           </pre>
+          <p className="mt-2 text-xs text-gray-500">
+            This is guidance from the scanner. Click "Preview fix" to generate a concrete patch and review the diff before creating a PR.
+          </p>
         </div>
 
         <div className="mt-6">
@@ -245,11 +330,92 @@ export default function IssueDetails() {
           )}
         </div>
 
-        {statusMessage && (
-          <div className="mt-4 rounded-3xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
-            {statusMessage}
-          </div>
-        )}
+        <div className="mt-6 space-y-4">
+          <button
+            onClick={previewFix}
+            disabled={isPreviewing || !issue}
+            className="px-5 py-3 rounded-2xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition"
+          >
+            {isPreviewing ? "Generating fix preview..." : "Preview fix"}
+          </button>
+
+          {fixPreviewError && (
+            <div className="rounded-3xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+              {fixPreviewError}
+            </div>
+          )}
+
+          {matchCandidates.length > 0 && (
+            <div className="rounded-3xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-900">
+              <p className="font-semibold">Multiple candidate matches found.</p>
+              <p className="mt-2">Please rescan or inspect the candidate lines:</p>
+              <ul className="mt-3 space-y-2">
+                {matchCandidates.map((candidate) => (
+                  <li key={candidate.line} className="rounded-2xl bg-white p-3 border border-orange-200">
+                    <p className="font-semibold">Line {candidate.line} — score {candidate.score}</p>
+                    <p className="text-xs text-gray-600">{candidate.snippet}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {fixPreview && (
+            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-800">Fix preview</h3>
+                  <p className="text-xs text-gray-500">Line {fixPreview.line}</p>
+                </div>
+                <button
+                  onClick={applyFix}
+                  disabled={isApplyingFix}
+                  className="px-4 py-2 rounded-2xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition"
+                >
+                  {isApplyingFix ? "Applying fix..." : "Apply fix via PR"}
+                </button>
+              </div>
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <div>
+                  <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Original snippet</p>
+                  <pre className="mt-2 bg-white rounded-3xl p-4 text-sm text-gray-800 overflow-x-auto whitespace-pre-wrap break-words">
+                    {fixPreview.originalSnippet || "No original snippet available."}
+                  </pre>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Fixed snippet</p>
+                  <pre className="mt-2 bg-white rounded-3xl p-4 text-sm text-gray-800 overflow-x-auto whitespace-pre-wrap break-words">
+                    {fixPreview.fixedSnippet || "No fixed snippet available."}
+                  </pre>
+                </div>
+              </div>
+              <div className="mt-4">
+                <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Diff</p>
+                <pre className="mt-2 bg-black text-green-400 rounded-3xl p-4 text-sm overflow-x-auto whitespace-pre-wrap break-words">
+                  {fixPreview.diff}
+                </pre>
+              </div>
+            </div>
+          )}
+
+          {prResult && (
+            <div className="rounded-3xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
+              <p className="font-semibold">Pull request created!</p>
+              <p className="mt-2">Branch: {prResult.branch}</p>
+              <p className="mt-2">
+                <a
+                  href={prResult.pr_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold text-blue-700 underline"
+                >
+                  View PR #{prResult.pr_number}
+                </a>
+              </p>
+            </div>
+          )}
+        </div>
+
 
         <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex gap-3 flex-wrap">

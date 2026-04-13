@@ -101,8 +101,11 @@ export default function Profile() {
           <h1 className="text-xl font-bold text-gray-800">Profile Settings</h1>
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-600">👤 {profile.name}</span>
+            {/* 🔥 STEP 2 — BACK BUTTON BUG (Very Important)
+                ⚠️ Problem: “Back goes to dashboard”
+                👉 Fix: Use navigate(-1) to restore natural navigation */}
             <button 
-              onClick={() => navigate("/dashboard")}
+              onClick={() => navigate(-1)}
               className="px-4 py-2 bg-gray-100 text-gray-700 font-bold rounded-lg hover:bg-gray-200 transition-all text-sm"
             >
               Back to Dashboard

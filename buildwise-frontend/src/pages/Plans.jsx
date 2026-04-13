@@ -140,8 +140,11 @@ export default function Plans() {
               <h1 className="text-3xl font-black text-gray-900">Plans & Usage</h1>
               <p className="mt-2 text-gray-600">Choose the best plan for your security workflow.</p>
             </div>
+            {/* 🔥 STEP 2 — BACK BUTTON BUG (Very Important)
+                ⚠️ Problem: “Back goes to dashboard”
+                👉 Fix: Use navigate(-1) to restore natural navigation */}
             <button
-              onClick={() => navigate("/dashboard")}
+              onClick={() => navigate(-1)}
               className="rounded-full border border-gray-300 bg-white px-5 py-3 text-sm font-bold text-gray-600 transition hover:bg-gray-50"
             >
               Back to Dashboard

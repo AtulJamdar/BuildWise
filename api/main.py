@@ -2,12 +2,14 @@ import base64
 import os
 import re
 import json
+import time
 from difflib import SequenceMatcher
 from fastapi import FastAPI, Body, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from dotenv import load_dotenv
 from db.connection import get_connection
+from core.fix_engine import generate_fix, apply_fix, generate_diff, validate_code
 from core.project_service import get_or_create_project, get_user_projects, get_project_scans, verify_project_access, verify_issue_access, verify_scan_access
 
 # Import your local services
@@ -277,6 +279,127 @@ def parse_github_repo_url(repo_url: str):
     return parts[0], parts[1]
 
 
+def github_headers(token: str = None):
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    gh_token = token or os.getenv("GITHUB_API_TOKEN")
+    if gh_token:
+        headers["Authorization"] = f"token {gh_token}"
+    return headers
+
+
+def get_github_default_branch(owner: str, repo: str, token: str = None):
+    url = f"https://api.github.com/repos/{owner}/{repo}"
+    response = requests.get(url, headers=github_headers(token))
+    response.raise_for_status()
+    return response.json().get("default_branch", "main")
+
+
+def get_github_branch_sha(owner: str, repo: str, branch: str, token: str = None):
+    url = f"https://api.github.com/repos/{owner}/{repo}/branches/{branch}"
+    response = requests.get(url, headers=github_headers(token))
+    if response.status_code == 404:
+        raise HTTPException(status_code=404, detail=f"GitHub branch not found: {branch}")
+    response.raise_for_status()
+    return response.json()["commit"]["sha"]
+
+
+def get_github_file(owner: str, repo: str, file_path: str, ref: str = None, token: str = None):
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
+    params = {"ref": ref} if ref else None
+    response = requests.get(url, headers=github_headers(token), params=params)
+    if response.status_code == 404:
+        raise HTTPException(status_code=404, detail=f"GitHub file not found: {file_path}")
+    response.raise_for_status()
+    data = response.json()
+    content = data.get("content")
+    sha = data.get("sha")
+    if content is None or sha is None:
+        raise HTTPException(status_code=500, detail="GitHub response missing file content")
+    decoded = base64.b64decode(content).decode("utf-8", errors="ignore")
+    return decoded.splitlines(), sha, data.get("path")
+
+
+def create_github_branch(owner: str, repo: str, base_sha: str, branch_name: str, token: str = None):
+    url = f"https://api.github.com/repos/{owner}/{repo}/git/refs"
+    response = requests.post(
+        url,
+        headers=github_headers(token),
+        json={"ref": f"refs/heads/{branch_name}", "sha": base_sha},
+    )
+    if response.status_code == 422:
+        raise HTTPException(status_code=409, detail=f"Branch already exists: {branch_name}")
+    response.raise_for_status()
+    return response.json()
+
+
+def update_github_file(owner: str, repo: str, file_path: str, branch: str, content: str, sha: str, message: str, token: str = None):
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
+    encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+    response = requests.put(
+        url,
+        headers=github_headers(token),
+        json={
+            "message": message,
+            "content": encoded,
+            "sha": sha,
+            "branch": branch,
+        },
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def create_pull_request(owner: str, repo: str, title: str, head: str, base: str, body: str, token: str = None):
+    url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
+    response = requests.post(
+        url,
+        headers=github_headers(token),
+        json={
+            "title": title,
+            "head": head,
+            "base": base,
+            "body": body,
+        },
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def collect_candidate_matches(lines, issue, threshold: float = 0.72, max_candidates: int = 5):
+    target = normalize_code(issue.get("code"))
+    if not target:
+        return []
+
+    candidates = []
+    for i, line in enumerate(lines):
+        score = SequenceMatcher(None, normalize_code(line), target).ratio()
+        if score >= threshold:
+            candidates.append({
+                "line": i + 1,
+                "score": round(score, 3),
+                "snippet": line.strip(),
+            })
+    candidates.sort(key=lambda item: item["score"], reverse=True)
+    return candidates[:max_candidates]
+
+
+def smart_match_info(lines, issue):
+    if not issue.get("code"):
+        line_no = get_line_by_number(lines, issue)
+        if line_no:
+            return line_no, []
+
+    exact_line = find_best_match(lines, issue)
+    if exact_line:
+        return exact_line, []
+
+    candidates = collect_candidate_matches(lines, issue)
+    if len(candidates) == 1:
+        return candidates[0]["line"], []
+
+    return None, candidates
+
+
 def fetch_github_file_lines(owner: str, repo: str, file_path: str, ref: str = None):
     headers = {"Accept": "application/vnd.github.v3+json"}
     github_token = os.getenv("GITHUB_API_TOKEN")
@@ -303,6 +426,19 @@ def fetch_github_file_lines(owner: str, repo: str, file_path: str, ref: str = No
 
 def normalize_code(text):
     return " ".join((text or "").strip().split())
+
+
+def get_line_by_number(lines, issue):
+    line_no = issue.get("line")
+    if isinstance(line_no, int) and 1 <= line_no <= len(lines):
+        return line_no
+    try:
+        line_no = int(line_no)
+        if 1 <= line_no <= len(lines):
+            return line_no
+    except (TypeError, ValueError):
+        pass
+    return None
 
 
 def find_best_match(lines, issue):
@@ -340,6 +476,11 @@ def get_snippet(lines, line_no):
 
 
 def smart_match(lines, issue):
+    if not issue.get("code"):
+        line_no = get_line_by_number(lines, issue)
+        if line_no:
+            return line_no
+
     line_no = find_best_match(lines, issue)
     if line_no:
         return line_no
@@ -375,6 +516,7 @@ def github_match_issue(issue_id: int, user_id: int = Depends(get_current_user)):
         "code": issue[3],
         "context_before": issue[16],
         "context_after": issue[17],
+        "line": issue[2],
     })
 
     matched = exact_line is not None
@@ -389,6 +531,173 @@ def github_match_issue(issue_id: int, user_id: int = Depends(get_current_user)):
         "matched": matched,
         "matched_snippet": matched_snippet,
         "lines_preview": lines[:6],
+    }
+
+
+@app.post("/issues/{issue_id}/fix-preview")
+def preview_fix(issue_id: int, data: dict = Body(...), user_id: int = Depends(get_current_user)):
+    if not verify_issue_access(issue_id, user_id):
+        raise HTTPException(status_code=403, detail="Access denied to this issue")
+
+    issue_row = get_issue_by_id(issue_id)
+    if not issue_row:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    repo_info = get_issue_repo_info(issue_id)
+    if not repo_info:
+        raise HTTPException(status_code=400, detail="Repo info unavailable for this issue")
+
+    repo_url, commit_sha, branch, repo_path = repo_info
+    if not repo_url or not repo_path:
+        raise HTTPException(status_code=400, detail="Missing repository URL or file path for GitHub preview")
+
+    parsed = parse_github_repo_url(repo_url)
+    if not parsed:
+        raise HTTPException(status_code=400, detail="Unsupported GitHub repo URL")
+
+    owner, repo_name = parsed
+    gh_token = data.get("gh_token") or os.getenv("GITHUB_API_TOKEN")
+    ref = branch or get_github_default_branch(owner, repo_name, gh_token)
+
+    lines, sha, _ = get_github_file(owner, repo_name, repo_path, ref=ref, token=gh_token)
+
+    issue = {
+        "code": issue_row[3],
+        "title": issue_row[6],
+        "line": issue_row[2],
+        "repo_path": repo_path,
+    }
+
+    if not issue["code"]:
+        line_no = get_line_by_number(lines, issue)
+        if line_no:
+            issue["code"] = lines[line_no - 1]
+
+    exact_line, candidates = smart_match_info(lines, issue)
+    if exact_line is None:
+        if candidates:
+            return {
+                "message": "Multiple candidate matches found",
+                "candidates": candidates,
+            }
+        raise HTTPException(status_code=409, detail="Code has changed since the scan. Please rescan.")
+
+    new_code = generate_fix(issue)
+    new_lines = apply_fix(list(lines), exact_line, new_code)
+
+    combined = "\n".join(new_lines)
+    if not validate_code(combined, repo_path):
+        raise HTTPException(status_code=400, detail="Generated fix failed syntax validation")
+
+    original_snippet = get_snippet(lines, exact_line)
+    fixed_snippet = get_snippet(new_lines, exact_line)
+    diff = generate_diff(lines, new_lines)
+    return {
+        "diff": diff,
+        "fixed_code": new_code,
+        "line": exact_line,
+        "originalSnippet": original_snippet,
+        "fixedSnippet": fixed_snippet,
+        "candidates": candidates,
+    }
+
+
+@app.post("/issues/{issue_id}/apply-fix")
+def apply_fix_issue(issue_id: int, data: dict = Body(...), user_id: int = Depends(get_current_user)):
+    if not verify_issue_access(issue_id, user_id):
+        raise HTTPException(status_code=403, detail="Access denied to this issue")
+
+    issue_row = get_issue_by_id(issue_id)
+    if not issue_row:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    repo_info = get_issue_repo_info(issue_id)
+    if not repo_info:
+        raise HTTPException(status_code=400, detail="Repo info unavailable for this issue")
+
+    repo_url, commit_sha, branch, repo_path = repo_info
+    if not repo_url or not repo_path:
+        raise HTTPException(status_code=400, detail="Missing repository URL or file path for GitHub apply")
+
+    parsed = parse_github_repo_url(repo_url)
+    if not parsed:
+        raise HTTPException(status_code=400, detail="Unsupported GitHub repo URL")
+
+    owner, repo_name = parsed
+    gh_token = data.get("gh_token") or os.getenv("GITHUB_API_TOKEN")
+    base_branch = branch or get_github_default_branch(owner, repo_name, gh_token)
+    base_sha = get_github_branch_sha(owner, repo_name, base_branch, gh_token)
+    lines, sha, _ = get_github_file(owner, repo_name, repo_path, ref=base_branch, token=gh_token)
+
+    issue = {
+        "code": issue_row[3],
+        "title": issue_row[6],
+        "line": issue_row[2],
+        "repo_path": repo_path,
+    }
+
+    if not issue["code"]:
+        line_no = get_line_by_number(lines, issue)
+        if line_no:
+            issue["code"] = lines[line_no - 1]
+
+    exact_line, candidates = smart_match_info(lines, issue)
+    if exact_line is None:
+        if candidates:
+            raise HTTPException(status_code=409, detail="Multiple candidate matches found. Please choose the correct line first.")
+        raise HTTPException(status_code=409, detail="Code has changed since the scan. Please rescan.")
+
+    new_code = generate_fix(issue)
+    new_lines = apply_fix(list(lines), exact_line, new_code)
+    combined = "\n".join(new_lines)
+    if not validate_code(combined, repo_path):
+        raise HTTPException(status_code=400, detail="Generated fix failed syntax validation")
+
+    branch_name = f"fix/issue-{issue_id}-{int(time.time())}"
+    try:
+        create_github_branch(owner, repo_name, base_sha, branch_name, gh_token)
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            branch_name = f"fix/issue-{issue_id}-{int(time.time())}-{os.getpid()}"
+            create_github_branch(owner, repo_name, base_sha, branch_name, gh_token)
+        else:
+            raise
+
+    update_github_file(
+        owner,
+        repo_name,
+        repo_path,
+        branch_name,
+        combined,
+        sha,
+        f"Fix issue #{issue_id}: {issue_row[6]}",
+        gh_token,
+    )
+
+    pr_body = (
+        f"This PR fixes issue #{issue_id} detected by BuildWise.\n\n"
+        f"**Issue:** {issue_row[6]}\n"
+        f"**File:** {repo_path}\n"
+        f"**Line:** {exact_line}\n"
+        f"**Why:** {issue_row[7]}\n\n"
+        "Generated fix is minimal and shown in the dashboard preview."
+    )
+
+    pr = create_pull_request(
+        owner,
+        repo_name,
+        f"Fix issue #{issue_id}: {issue_row[6]}",
+        branch_name,
+        base_branch,
+        pr_body,
+        gh_token,
+    )
+
+    return {
+        "branch": branch_name,
+        "pr_url": pr.get("html_url"),
+        "pr_number": pr.get("number"),
+        "diff": generate_diff(lines, new_lines),
     }
 
 
@@ -498,20 +807,45 @@ def get_issue(issue_id: int, user_id: int = Depends(get_current_user)):
     if not verify_issue_access(issue_id, user_id):
         raise HTTPException(status_code=403, detail="Access denied to this issue")
     issue = get_issue_by_id(issue_id)
-    if not issue: 
+    if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
     print(f"📝 Fetching issue {issue_id}: File={issue[1]}, Line={issue[2]}, Title={issue[6]}")
+
+    code_snippet = issue[3]
+    github_match = None
+    repo_info = get_issue_repo_info(issue_id)
+    if not code_snippet and repo_info:
+        repo_url, commit_sha, branch, repo_path = repo_info
+        if repo_url and repo_path:
+            parsed = parse_github_repo_url(repo_url)
+            if parsed:
+                owner, repo_name = parsed
+                try:
+                    lines = fetch_github_file_lines(owner, repo_name, repo_path, ref=branch)
+                    line_no = get_line_by_number(lines, {"line": issue[2]})
+                    if line_no:
+                        code_snippet = get_snippet(lines, line_no)
+                        github_match = {
+                            "exact_line": line_no,
+                            "matched_snippet": code_snippet,
+                            "branch": branch,
+                        }
+                except Exception:
+                    pass
+
     activity = get_issue_activity(issue_id)
     return {
-        "id": issue[0], 
-        "file": issue[1], 
-        "line": issue[2], 
+        "id": issue[0],
+        "file": issue[1],
+        "line": issue[2],
         "code": issue[3],
+        "code_snippet": code_snippet,
+        "github_match": github_match,
         "type": issue[4],
-        "severity": issue[5], 
-        "title": issue[6], 
-        "why": issue[7], 
-        "fix": issue[8], 
+        "severity": issue[5],
+        "title": issue[6],
+        "why": issue[7],
+        "fix": issue[8],
         "status": issue[9],
         "note": issue[10],
         "assigned_to": issue[11],
