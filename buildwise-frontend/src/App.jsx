@@ -1006,7 +1006,7 @@ const Dashboard = () => {
 // --- MAIN APP ROUTER ---
 function ProtectedLayout() {
   return (
-    <div className="flex min-h-screen bg-gray-100">
+    <div className="flex min-h-screen bg-gray-100 dark:bg-slate-950">
       <div className="w-64 h-screen fixed left-0 top-0">
         <Sidebar />
       </div>
@@ -1018,6 +1018,7 @@ function ProtectedLayout() {
 }
 
 function App() {
+  const [dark, setDark] = useState(true);
   const location = useLocation();
   const protectedRoutes = [
     "/dashboard",
@@ -1032,9 +1033,18 @@ function App() {
   const showNavbar = location.pathname !== "/" && !protectedRoutes.some((route) => location.pathname.startsWith(route));
 
   return (
-    <>
-      {showNavbar && <Navbar />}
-      <Routes>
+    <div className={dark ? "dark" : ""}>
+      <div className="min-h-screen bg-white dark:bg-black text-black dark:text-white">
+        <div className="fixed right-4 top-4 z-50">
+          <button
+            onClick={() => setDark((prev) => !prev)}
+            className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-md transition hover:bg-gray-100 dark:border-gray-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
+          >
+            {dark ? "Switch to Light" : "Switch to Dark"}
+          </button>
+        </div>
+        {showNavbar && <Navbar dark={dark} />}
+        <Routes>
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
@@ -1053,7 +1063,8 @@ function App() {
         <Route path="/oauth-success" element={<OAuthSuccess />} />
         <Route path="/accept-invite/:token" element={<AcceptInvite />} />
       </Routes>
-    </>
+      </div>
+    </div>
   );
 }
 

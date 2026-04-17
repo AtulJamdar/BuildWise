@@ -1,6 +1,9 @@
 import base64
 import os
+from pydoc import text
+from pydoc import text
 import re
+import difflib
 import json
 import time
 from difflib import SequenceMatcher
@@ -31,8 +34,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from fastapi.responses import RedirectResponse
 from datetime import datetime, timezone
 
-load_dotenv()
-config = Config(environ=os.environ)
 
 def get_env(key, default=None):
     value = os.getenv(key, default)
@@ -45,31 +46,11 @@ GOOGLE_CLIENT_ID = get_env("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = get_env("GOOGLE_CLIENT_SECRET")
 SECRET_KEY = get_env("SECRET_KEY", "supersecret")
 
-# Patch requests auth to support UTF-8 credentials if needed.
-import requests.auth
-
-def _basic_auth_str_utf8(username, password):
-    username_bytes = username.encode("utf-8") if isinstance(username, str) else username
-    password_bytes = password.encode("utf-8") if isinstance(password, str) else password
-    user_pass = base64.b64encode(username_bytes + b":" + password_bytes).decode("latin1")
-    return "Basic %s" % user_pass
-
-requests.auth._basic_auth_str = _basic_auth_str_utf8
-
 razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 BACKEND_URL = get_env("BACKEND_URL", "http://localhost:8000")
 GITHUB_REDIRECT_URI = get_env("GITHUB_REDIRECT_URI", f"{BACKEND_URL}/auth/github/callback")
 GOOGLE_REDIRECT_URI = get_env("GOOGLE_REDIRECT_URI", f"{BACKEND_URL}/auth/google/callback")
 FRONTEND_URL = get_env("FRONTEND_URL", "http://localhost:5173")
-
-oauth = OAuth(config)
-oauth.register(
-    name="google",
-    client_id=GOOGLE_CLIENT_ID,
-    client_secret=GOOGLE_CLIENT_SECRET,
-    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile"},
-)
 
 app = FastAPI(title="BuildWise API")
 
@@ -90,6 +71,38 @@ app.add_middleware(
 )
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+
+
+
+
+load_dotenv()
+config = Config(environ=os.environ)
+
+
+
+# Patch requests auth to support UTF-8 credentials if needed.
+import requests.auth
+
+def _basic_auth_str_utf8(username, password):
+    username_bytes = username.encode("utf-8") if isinstance(username, str) else username
+    password_bytes = password.encode("utf-8") if isinstance(password, str) else password
+    user_pass = base64.b64encode(username_bytes + b":" + password_bytes).decode("latin1")
+    return "Basic %s" % user_pass
+
+requests.auth._basic_auth_str = _basic_auth_str_utf8
+
+
+
+oauth = OAuth(config)
+oauth.register(
+    name="google",
+    client_id=GOOGLE_CLIENT_ID,
+    client_secret=GOOGLE_CLIENT_SECRET,
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile"},
+)
+
+
 
 @app.on_event("startup")
 def ensure_tables_exist():
@@ -307,15 +320,25 @@ def get_github_file(owner: str, repo: str, file_path: str, ref: str = None, toke
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
     params = {"ref": ref} if ref else None
     response = requests.get(url, headers=github_headers(token), params=params)
+    
     if response.status_code == 404:
         raise HTTPException(status_code=404, detail=f"GitHub file not found: {file_path}")
+    
     response.raise_for_status()
     data = response.json()
     content = data.get("content")
     sha = data.get("sha")
+    
     if content is None or sha is None:
         raise HTTPException(status_code=500, detail="GitHub response missing file content")
+    
     decoded = base64.b64decode(content).decode("utf-8", errors="ignore")
+    
+    # --- Debug Logs from Image ---
+    print(f"📄 Fetching file: {file_path}")
+    print(f"📏 Total lines fetched: {len(decoded.splitlines())}")
+    # -----------------------------
+
     return decoded.splitlines(), sha, data.get("path")
 
 
@@ -383,21 +406,6 @@ def collect_candidate_matches(lines, issue, threshold: float = 0.72, max_candida
     return candidates[:max_candidates]
 
 
-def smart_match_info(lines, issue):
-    if not issue.get("code"):
-        line_no = get_line_by_number(lines, issue)
-        if line_no:
-            return line_no, []
-
-    exact_line = find_best_match(lines, issue)
-    if exact_line:
-        return exact_line, []
-
-    candidates = collect_candidate_matches(lines, issue)
-    if len(candidates) == 1:
-        return candidates[0]["line"], []
-
-    return None, candidates
 
 
 def fetch_github_file_lines(owner: str, repo: str, file_path: str, ref: str = None):
@@ -441,18 +449,6 @@ def get_line_by_number(lines, issue):
     return None
 
 
-def find_best_match(lines, issue):
-    target = normalize_code(issue.get("code"))
-    if not target:
-        return None
-
-    normalized_lines = [normalize_code(line) for line in lines]
-    for i, normalized_line in enumerate(normalized_lines):
-        if normalized_line == target:
-            return i + 1
-    return None
-
-
 def fuzzy_match(lines, issue):
     target = normalize_code(issue.get("code"))
     if not target:
@@ -469,23 +465,50 @@ def fuzzy_match(lines, issue):
     return best_line if best_score >= 0.72 else None
 
 
-def get_snippet(lines, line_no):
-    start = max(0, line_no - 3)
-    end = min(len(lines), line_no + 2)
-    return "\n".join(lines[start:end])
+def normalize_block(text):
+    return " ".join(text.split()) if text else ""
+
+def robust_match(lines, issue):
+    target = normalize_block(issue.get("code"))
+
+    # 1. Exact match
+    for i, line in enumerate(lines):
+        if normalize_block(line) == target:
+            return i + 1
+
+    # 2. Context match (stronger)
+    before = normalize_block(issue.get("context_before"))
+    after = normalize_block(issue.get("context_after"))
+
+    for i in range(len(lines)):
+        block = "\n".join(lines[max(0, i-2):i+3])
+        block_norm = normalize_block(block)
+
+        if before and before in block_norm:
+            return i + 1
+        if after and after in block_norm:
+            return i + 1
+
+    # 3. Fuzzy fallback
+    best_score = 0
+    best_line = None
+
+    for i, line in enumerate(lines):
+        score = difflib.SequenceMatcher(None, target, normalize_block(line)).ratio()
+        if score > best_score:
+            best_score = score
+            best_line = i + 1
+
+    if best_score > 0.7:
+        return best_line
+
+    return None
 
 
-def smart_match(lines, issue):
-    if not issue.get("code"):
-        line_no = get_line_by_number(lines, issue)
-        if line_no:
-            return line_no
-
-    line_no = find_best_match(lines, issue)
-    if line_no:
-        return line_no
-
-    return fuzzy_match(lines, issue)
+def get_snippet(lines, line_no, context=5):
+    start = max(0, line_no - context)
+    end = min(len(lines), line_no + context)
+    return "\n".join(lines[start:end]) 
 
 
 @app.get("/issues/{issue_id}/github-match")
@@ -512,7 +535,7 @@ def github_match_issue(issue_id: int, user_id: int = Depends(get_current_user)):
     owner, repo_name = parsed
     lines = fetch_github_file_lines(owner, repo_name, repo_path, ref=branch)
 
-    exact_line = smart_match(lines, {
+    exact_line = robust_match(lines, {
         "code": issue[3],
         "context_before": issue[16],
         "context_after": issue[17],
@@ -573,7 +596,8 @@ def preview_fix(issue_id: int, data: dict = Body(...), user_id: int = Depends(ge
         if line_no:
             issue["code"] = lines[line_no - 1]
 
-    exact_line, candidates = smart_match_info(lines, issue)
+    exact_line = robust_match(lines, issue)
+    candidates = []
     if exact_line is None:
         if candidates:
             return {
@@ -590,7 +614,11 @@ def preview_fix(issue_id: int, data: dict = Body(...), user_id: int = Depends(ge
         raise HTTPException(status_code=400, detail="Generated fix failed syntax validation")
 
     original_snippet = get_snippet(lines, exact_line)
+    print("📌 ORIGINAL SNIPPET:")
+    print(original_snippet)
     fixed_snippet = get_snippet(new_lines, exact_line)
+    print("📌 FIXED SNIPPET:")
+    print(fixed_snippet)
     diff = generate_diff(lines, new_lines)
     return {
         "diff": diff,
@@ -604,12 +632,16 @@ def preview_fix(issue_id: int, data: dict = Body(...), user_id: int = Depends(ge
 
 @app.post("/issues/{issue_id}/apply-fix")
 def apply_fix_issue(issue_id: int, data: dict = Body(...), user_id: int = Depends(get_current_user)):
+    
     if not verify_issue_access(issue_id, user_id):
         raise HTTPException(status_code=403, detail="Access denied to this issue")
 
     issue_row = get_issue_by_id(issue_id)
     if not issue_row:
         raise HTTPException(status_code=404, detail="Issue not found")
+    
+    if not issue_row.get("fixable", True): 
+        pass
 
     repo_info = get_issue_repo_info(issue_id)
     if not repo_info:
@@ -629,6 +661,8 @@ def apply_fix_issue(issue_id: int, data: dict = Body(...), user_id: int = Depend
     base_sha = get_github_branch_sha(owner, repo_name, base_branch, gh_token)
     lines, sha, _ = get_github_file(owner, repo_name, repo_path, ref=base_branch, token=gh_token)
 
+    
+
     issue = {
         "code": issue_row[3],
         "title": issue_row[6],
@@ -636,12 +670,16 @@ def apply_fix_issue(issue_id: int, data: dict = Body(...), user_id: int = Depend
         "repo_path": repo_path,
     }
 
+    if issue.get("code") not in "\n".join(lines):
+        print("⚠️ Warning: code not found in file")
+
     if not issue["code"]:
         line_no = get_line_by_number(lines, issue)
         if line_no:
             issue["code"] = lines[line_no - 1]
 
-    exact_line, candidates = smart_match_info(lines, issue)
+    exact_line = robust_match(lines, issue)
+    candidates = []
     if exact_line is None:
         if candidates:
             raise HTTPException(status_code=409, detail="Multiple candidate matches found. Please choose the correct line first.")
@@ -806,14 +844,26 @@ def get_issues(scan_id: int, user_id: int = Depends(get_current_user)):
 def get_issue(issue_id: int, user_id: int = Depends(get_current_user)):
     if not verify_issue_access(issue_id, user_id):
         raise HTTPException(status_code=403, detail="Access denied to this issue")
+    
     issue = get_issue_by_id(issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
+
+    # --- Debug issue data (VERY IMPORTANT) ---
+    print("🔥 ISSUE DEBUG START")
+    print(f"ID: {issue_id}")
+    print(f"DB CODE: {repr(issue[3])}")
+    print(f"LINE: {issue[2]}")
+    print(f"FILE: {issue[1]}")
+    print("🔥 ISSUE DEBUG END")
+
+    # Original logging
     print(f"📝 Fetching issue {issue_id}: File={issue[1]}, Line={issue[2]}, Title={issue[6]}")
 
     code_snippet = issue[3]
     github_match = None
     repo_info = get_issue_repo_info(issue_id)
+
     if not code_snippet and repo_info:
         repo_url, commit_sha, branch, repo_path = repo_info
         if repo_url and repo_path:
@@ -830,8 +880,8 @@ def get_issue(issue_id: int, user_id: int = Depends(get_current_user)):
                             "matched_snippet": code_snippet,
                             "branch": branch,
                         }
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"❌ ERROR: {e}")
 
     activity = get_issue_activity(issue_id)
     return {

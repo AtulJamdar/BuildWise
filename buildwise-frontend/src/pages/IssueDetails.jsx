@@ -33,11 +33,21 @@ export default function IssueDetails() {
         });
 
         if (!res.ok) {
-          const data = await res.json();
+          let data;
+try {
+  data = await res.json();
+} catch {
+  data = {};
+}
           throw new Error(data.detail || "Issue not found");
         }
 
-        const data = await res.json();
+        let data;
+try {
+  data = await res.json();
+} catch {
+  data = {};
+}
         setIssue(data);
       } catch (err) {
         setError(err.message || "Unable to load issue details.");
@@ -70,11 +80,21 @@ export default function IssueDetails() {
           });
 
           if (!res.ok) {
-            const data = await res.json();
+            let data;
+try {
+  data = await res.json();
+} catch {
+  data = {};
+}
             throw new Error(data.detail || "GitHub match not available");
           }
 
-          const data = await res.json();
+          let data;
+try {
+  data = await res.json();
+} catch {
+  data = {};
+}
           setGithubMatch(data);
         } catch (err) {
           setMatchError(err.message || "Unable to fetch GitHub match.");
@@ -110,7 +130,12 @@ export default function IssueDetails() {
         body: JSON.stringify({ gh_token: ghToken }),
       });
 
-      const data = await res.json();
+      let data;
+try {
+  data = await res.json();
+} catch {
+  data = {};
+}
       console.log("fix-preview response", data);
       if (!res.ok) {
         throw new Error(data.detail || data.message || "Unable to preview fix.");
@@ -151,7 +176,12 @@ export default function IssueDetails() {
         },
         body: JSON.stringify({ gh_token: ghToken }),
       });
-      const data = await res.json();
+      let data;
+try {
+  data = await res.json();
+} catch {
+  data = {};
+}
       if (!res.ok) {
         throw new Error(data.detail || data.message || "Unable to create PR.");
       }
@@ -184,7 +214,12 @@ export default function IssueDetails() {
       });
 
       if (!res.ok) {
-        const data = await res.json();
+        let data;
+try {
+  data = await res.json();
+} catch {
+  data = {};
+}
         throw new Error(data.detail || "Failed to update issue status.");
       }
 
@@ -272,21 +307,44 @@ export default function IssueDetails() {
             <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Location</p>
             <p className="text-sm font-semibold text-gray-900">
               Line {issue.line || "N/A"}
-              {githubMatch?.branch ? ` • branch ${githubMatch.branch}` : ""}
+              {githubMatch?.exact_line ? ` • branch ${githubMatch.branch}` : ""}
             </p>
           </div>
         </div>
 
         <div className="mt-6">
           <h2 className="text-base font-bold text-gray-800">Code snippet</h2>
-          {issue.context_before && issue.context_before.length > 0 && (
-            <pre className="mt-3 bg-slate-50 rounded-3xl p-4 text-sm text-gray-700 overflow-x-auto whitespace-pre-wrap break-words">
-              {issue.context_before.join("\n")}
-            </pre>
-          )}
+          {issue.context_before && (
+  <pre className="mt-3 bg-slate-50 rounded-3xl p-4 text-sm text-gray-700 overflow-x-auto whitespace-pre-wrap break-words">
+    {Array.isArray(issue.context_before)
+      ? issue.context_before.join("\n")
+      : issue.context_before}
+  </pre>
+)}
           <pre className="mt-3 bg-red-50 rounded-3xl p-4 text-sm text-red-800 overflow-x-auto whitespace-pre-wrap break-words">
-            {issue.code || issue.code_snippet || githubMatch?.matched_snippet || "No code snippet available."}
-          </pre>
+  {(() => {
+    // 1. Identify raw data
+    const rawData = issue.code || issue.code_snippet || githubMatch?.matched_snippet || "";
+    
+    // 2. FIXED: Handle Array + Force String conversion (+ "") to prevent .split crash
+    const codeString = (Array.isArray(rawData) ? rawData.join("\n") : rawData || "") + "";
+
+    // 3. Safe to split and map
+    return codeString.split("\n").map((line, index) => {
+      const lineNumber = index + 1;
+      const isHighlighted = lineNumber === issue.line;
+
+      return (
+        <div
+          key={index}
+          className={isHighlighted ? "bg-yellow-200 font-bold px-2 rounded" : ""}
+        >
+          {line}
+        </div>
+      );
+    });
+  })()}
+</pre>
         </div>
 
         <div className="mt-6">
@@ -308,8 +366,12 @@ export default function IssueDetails() {
                   Exact GitHub line found at line {githubMatch.exact_line} on branch {githubMatch.branch || "unknown"}.
                 </p>
                 <pre className="mt-3 bg-slate-100 rounded-3xl p-4 text-sm text-gray-800 overflow-x-auto whitespace-pre-wrap break-words">
-                  {githubMatch.matched_snippet || issue.code}
-                </pre>
+  {Array.isArray(githubMatch.matched_snippet)
+    ? githubMatch.matched_snippet.join("\n")
+    : githubMatch.matched_snippet || (Array.isArray(issue.code) 
+        ? issue.code.join("\n") 
+        : issue.code || "")}
+</pre>
               </div>
             ) : (
               <p className="text-sm text-orange-600">Code changed since the scan. Unable to locate the exact line in GitHub.</p>
@@ -341,7 +403,7 @@ export default function IssueDetails() {
               <p className="font-semibold">Multiple candidate matches found.</p>
               <p className="mt-2">Please rescan or inspect the candidate lines:</p>
               <ul className="mt-3 space-y-2">
-                {matchCandidates.map((candidate) => (
+                {Array.isArray(matchCandidates) && matchCandidates.length > 0 && ((candidate) => (
                   <li key={candidate.line} className="rounded-2xl bg-white p-3 border border-orange-200">
                     <p className="font-semibold">Line {candidate.line} — score {candidate.score}</p>
                     <p className="text-xs text-gray-600">{candidate.snippet}</p>
@@ -352,42 +414,65 @@ export default function IssueDetails() {
           )}
 
           {fixPreview && (
-            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-gray-800">Fix preview</h3>
-                  <p className="text-xs text-gray-500">Line {fixPreview.line}</p>
-                </div>
-                <button
-                  onClick={applyFix}
-                  disabled={isApplyingFix}
-                  className="px-4 py-2 rounded-2xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition"
-                >
-                  {isApplyingFix ? "Applying fix..." : "Apply fix via PR"}
-                </button>
-              </div>
-              <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                <div>
-                  <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Original snippet</p>
-                  <pre className="mt-2 bg-white rounded-3xl p-4 text-sm text-gray-800 overflow-x-auto whitespace-pre-wrap break-words">
-                    {fixPreview.originalSnippet || "No original snippet available."}
-                  </pre>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Fixed snippet</p>
-                  <pre className="mt-2 bg-white rounded-3xl p-4 text-sm text-gray-800 overflow-x-auto whitespace-pre-wrap break-words">
-                    {fixPreview.fixedSnippet || "No fixed snippet available."}
-                  </pre>
-                </div>
-              </div>
-              <div className="mt-4">
-                <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Diff</p>
-                <pre className="mt-2 bg-black text-green-400 rounded-3xl p-4 text-sm overflow-x-auto whitespace-pre-wrap break-words">
-                  {fixPreview.diff}
-                </pre>
-              </div>
-            </div>
-          )}
+  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div>
+        <h3 className="text-sm font-bold text-gray-800">Fix preview</h3>
+        <p className="text-xs text-gray-500">Line {fixPreview.line}</p>
+      </div>
+      <button
+        onClick={applyFix}
+        disabled={isApplyingFix}
+        className="px-4 py-2 rounded-2xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition"
+      >
+        {isApplyingFix ? "Applying fix..." : "Apply fix via PR"}
+      </button>
+    </div>
+
+    {/* --- THE VISUAL HACK START --- */}
+    {fixPreview.fixed_code && (
+      <div className="mt-4 p-4 bg-yellow-100 rounded-2xl text-sm border border-yellow-200">
+        <strong className="text-yellow-900 font-bold block mb-1">💡 Suggested change:</strong>
+        <p className="text-xs text-yellow-700 mb-2 italic">Replace the original line with this:</p>
+        <pre className="p-3 bg-white/50 rounded-xl font-mono text-yellow-900 overflow-x-auto border border-yellow-200">
+          {(Array.isArray(fixPreview.fixed_code) 
+            ? fixPreview.fixed_code.join("\n") 
+            : fixPreview.fixed_code || "") + ""}
+        </pre>
+      </div>
+    )}
+    {/* --- THE VISUAL HACK END --- */}
+
+    <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <div>
+        <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Original snippet</p>
+        <pre className="mt-2 bg-white rounded-3xl p-4 text-sm text-gray-800 overflow-x-auto whitespace-pre-wrap break-words">
+          {(Array.isArray(fixPreview.originalSnippet) 
+            ? fixPreview.originalSnippet.join("\n") 
+            : fixPreview.originalSnippet || "No original snippet available.") + ""}
+        </pre>
+      </div>
+      <div>
+        <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Fixed snippet</p>
+        <pre className="mt-2 bg-white rounded-3xl p-4 text-sm text-gray-800 overflow-x-auto whitespace-pre-wrap break-words">
+          {(() => {
+            const rawData = fixPreview.diff 
+              ? fixPreview.fixedSnippet 
+              : (fixPreview.fixed_code || fixPreview.fixedSnippet || "No fixed snippet available.");
+            return (Array.isArray(rawData) ? rawData.join("\n") : rawData) + "";
+          })()}
+        </pre>
+      </div>
+    </div>
+    
+    <div className="mt-4">
+      <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Diff</p>
+      <pre className="mt-2 bg-black text-green-400 rounded-3xl p-4 text-sm overflow-x-auto whitespace-pre-wrap break-words">
+        {fixPreview.diff}
+      </pre>
+    </div>
+  </div>
+)}
 
           {prResult && (
             <div className="rounded-3xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
@@ -452,15 +537,17 @@ export default function IssueDetails() {
           <div className="mt-8 p-6 rounded-3xl bg-slate-50 border border-slate-200">
             <h2 className="text-base font-bold text-gray-800">Activity log</h2>
             <ul className="mt-4 space-y-3 text-sm text-gray-700">
-              {issue.activity.map((entry, index) => (
-                <li key={index} className="rounded-2xl bg-white p-4 border border-gray-200">
-                  <p className="font-semibold text-gray-900">{entry.action.replace(/_/g, " ")}</p>
-                  {entry.details && <p className="text-xs text-gray-500 mt-1">{entry.details}</p>}
-                  <p className="text-xs text-gray-500 mt-2">
-                    {entry.user ? `By ${entry.user}` : "System"} · {entry.created_at}
-                  </p>
-                </li>
-              ))}
+              {Array.isArray(issue.activity) && issue.activity.length > 0 && 
+  issue.activity.map((entry, index) => (
+    <li key={index} className="rounded-2xl bg-white p-4 border border-gray-200">
+      <p className="font-semibold text-gray-900">{entry.action.replace(/_/g, " ")}</p>
+      {entry.details && <p className="text-xs text-gray-500 mt-1">{entry.details}</p>}
+      <p className="text-xs text-gray-500 mt-2">
+        {entry.user ? `By ${entry.user}` : "System"} · {entry.created_at}
+      </p>
+    </li>
+  ))
+}
             </ul>
           </div>
         )}

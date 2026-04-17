@@ -12,8 +12,8 @@ export default function Navbar() {
   };
 
   return (
-    <div className="flex flex-wrap justify-between items-center p-6 bg-white shadow">
-      <h1 className="text-2xl font-bold">{t("brand")}</h1>
+    <div className="flex flex-wrap justify-between items-center p-6 bg-white dark:bg-slate-900 shadow dark:shadow-slate-800">
+      <h1 className="text-2xl font-bold text-black dark:text-white">{t("brand")}</h1>
 
       <div className="flex flex-wrap items-center gap-4">
         <select

@@ -8,6 +8,16 @@ from core.js_analyzer import build_dependency_graph, find_used_files, normalize_
 from core.constants import SAFE_FILES, ENTRY_FILES, LOGIC_EXTENSIONS
 
 
+def extract_exact_code(file_path, line_number):
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+        if 1 <= line_number <= len(lines):
+            return lines[line_number - 1].rstrip("\n")
+    except Exception:
+        return None
+
+
 def extract_issue_context(file_path, line_number, context_lines=2):
     if not file_path or not line_number:
         return None, None
@@ -98,11 +108,14 @@ def scan_project(path, project_name, user_id, repo_url=None, team_id=None, repo_
                 file_issue_map[abs_file_path].append({
                     "title": "Possibly Unused File",
                     "file": file,
+                    "line": 1,
+                    "code": file_name,
                     "severity": "LOW",
                     "type": "Architecture",
+                    "fixable": False,
                     "why": f"'{file_name}' is not imported by any other file.",
                     "fix": "Check if this component is needed."
-                })
+})
 
         except Exception as e:
             print(f"⚠️ JS Analyzer failed: {e}")
@@ -130,9 +143,17 @@ def scan_project(path, project_name, user_id, repo_url=None, team_id=None, repo_
                 if issue.get("line") and os.path.exists(abs_file_path):
                     before, after = extract_issue_context(abs_file_path, issue.get("line"))
                     if before is not None:
-                        issue["context_before"] = before
+                        # issue["context_before"] = before
+                        issue["context_before"] = "\n".join(before)
                     if after is not None:
-                        issue["context_after"] = after
+                        # issue["context_after"] = after
+                        issue["context_after"] = "\n".join(after)
+
+                if issue.get("line") and os.path.exists(abs_file_path):
+                    code_line = extract_exact_code(abs_file_path, issue.get("line"))
+                    if code_line:
+                        issue["code"] = code_line   
+        
 
                 if "fingerprint" not in issue:
                     fingerprint_file = issue.get("repo_path", raw_file)
@@ -143,6 +164,16 @@ def scan_project(path, project_name, user_id, repo_url=None, team_id=None, repo_
                         fingerprint_line,
                         fingerprint_code,
                     )
+
+                    # --- START DEBUG LOGS ---
+                print("🧪 ISSUE BEFORE SAVE")
+                print(f"File: {issue.get('file')}")
+                print(f"Line: {issue.get('line')}")
+                print(f"Code: {repr(issue.get('code'))}")
+                print(f"Context Before: {issue.get('context_before')}")
+                print(f"Context After: {issue.get('context_after')}")
+                print("------")
+                # --- END DEBUG LOGS ---
 
                 final_results.append(issue)
 
