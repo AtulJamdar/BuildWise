@@ -4,9 +4,36 @@ import math
 import hashlib
 import esprima
 from core.constants import SAFE_FILES, ENTRY_FILES, LOGIC_EXTENSIONS
+from collections import defaultdict
 
 # Standard folders to ignore across all rules
-IGNORE_FOLDERS = {'.git', 'node_modules', '__pycache__', 'venv', '.vscode'}
+IGNORE_FOLDERS = {'.git', 'node_modules', '__pycache__', '.venv', 'venv', 'dist', 'build'}
+
+
+# Placeholder / test value patterns — if a captured value matches these, skip it
+PLACEHOLDER_PATTERNS = re.compile(
+    r'^(?:'
+    r'your[-_]?.*key|'           # "your_api_key", "your-secret"
+    r'replace[-_]?.*|'           # "replace_me", "replace-this"
+    r'enter[-_]?.*|'             # "enter_your_key"
+    r'insert[-_]?.*|'            # "insert_key_here"
+    r'changeme|'                 # literal "changeme"
+    r'placeholder|'              # literal "placeholder"
+    r'xxx+|'                     # "xxx", "xxxx"
+    r'<[^>]+>|'                  # <YOUR_KEY>, <API_KEY>
+    r'\$\{[^}]+\}|'             # ${ENV_VAR} — env var reference, not a real value
+    r'%\([^)]+\)s|'             # %(VAR)s — Python string template
+    r'example|'                  # "example"
+    r'test|'                     # "test"
+    r'dummy|'                    # "dummy"
+    r'fake|'                     # "fake"
+    r'sample|'                   # "sample"
+    r'todo'                      # "todo"
+    r').*$',
+    re.IGNORECASE
+)
+
+
 BINARY_FILE_EXTENSIONS = {
     '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.svg',
     '.zip', '.tar', '.gz', '.7z', '.woff', '.woff2', '.eot', '.ttf',
@@ -414,45 +441,187 @@ def check_repeated_code(path):
     return issues
 
 # Rule 8: Secret / API Key Detection
-def check_api_keys(path):
+def is_placeholder(value: str) -> bool:
+    """Return True if the captured value looks like a placeholder, not a real secret."""
+    if not value or len(value) < 8:
+        return True
+    return bool(PLACEHOLDER_PATTERNS.match(value.strip()))
+
+def shannon_entropy(data: str) -> float:
+    """Calculate Shannon entropy of a string. High entropy (>3.5) = likely real secret."""
+    if not data:
+        return 0.0
+    freq = defaultdict(int)
+    for ch in data:
+        freq[ch] += 1
+    length = len(data)
+    return -sum((count / length) * math.log2(count / length) for count in freq.values())
+
+
+# Each entry: (regex, label, severity, check_entropy, min_entropy)
+# check_entropy=True means we validate entropy on the captured group (group 1 if present)
+# Format-anchored patterns (vendor-specific prefixes) don't need entropy checks — the prefix IS the signal
+SECRET_PATTERNS = [
+    # ── Format-anchored: vendor-specific prefixes ────────────────────────────
+    # These patterns are high-confidence because the prefix itself is a known format
+    (re.compile(r'AKIA[0-9A-Z]{16}'), "AWS access key ID", "HIGH", False, 0),
+    (re.compile(r'(?:A3T[A-Z0-9]|AGPA|AIDA|AROA|ASCA|ASIA)[A-Z0-9]{16}'), "AWS IAM key", "HIGH", False, 0),
+    (re.compile(r'sk_live_[0-9a-zA-Z]{24,}'), "Stripe live secret key", "HIGH", False, 0),
+    (re.compile(r'pk_live_[0-9a-zA-Z]{24,}'), "Stripe live publishable key", "MEDIUM", False, 0),
+    (re.compile(r'sk_test_[0-9a-zA-Z]{24,}'), "Stripe test secret key", "LOW", False, 0),
+    (re.compile(r'ghp_[0-9a-zA-Z]{36}'), "GitHub personal access token", "HIGH", False, 0),
+    (re.compile(r'gho_[0-9a-zA-Z]{36}'), "GitHub OAuth token", "HIGH", False, 0),
+    (re.compile(r'ghs_[0-9a-zA-Z]{36}'), "GitHub Actions secret", "HIGH", False, 0),
+    (re.compile(r'glpat-[0-9a-zA-Z\-]{20}'), "GitLab personal access token", "HIGH", False, 0),
+    (re.compile(r'AIza[0-9A-Za-z_-]{35}'), "Google API key", "HIGH", False, 0),
+    (re.compile(r'ya29\.[0-9A-Za-z\-_]{40,}'), "Google OAuth access token", "HIGH", False, 0),
+    (re.compile(r'xox[baprs]-[0-9a-zA-Z\-]{10,}'), "Slack token", "HIGH", False, 0),
+    (re.compile(r'SG\.[0-9A-Za-z\-_]{22}\.[0-9A-Za-z\-_]{43}'), "SendGrid API key", "HIGH", False, 0),
+    (re.compile(r'EAACEdEose0cBA[0-9A-Za-z]+'), "Facebook access token", "HIGH", False, 0),
+    (re.compile(r'AC[a-z0-9]{32}'), "Twilio account SID", "MEDIUM", False, 0),
+    (re.compile(r'SK[a-z0-9]{32}'), "Twilio auth token", "HIGH", False, 0),
+    (re.compile(r'npm_[A-Za-z0-9]{36}'), "npm access token", "HIGH", False, 0),
+    (re.compile(r'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'), "JWT token", "MEDIUM", False, 0),
+    (re.compile(r'-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'), "Private key", "HIGH", False, 0),
+
+    # ── Connection strings: must contain actual credentials (@ separator) ────
+    (re.compile(r'mongodb(?:\+srv)?://[^:]+:[^@]{8,}@[^\s"\'<>]+'), "MongoDB connection string with credentials", "HIGH", False, 0),
+    (re.compile(r'postgres(?:ql)?://[^:]+:[^@]{8,}@[^\s"\'<>]+'), "PostgreSQL connection string with credentials", "HIGH", False, 0),
+    (re.compile(r'mysql://[^:]+:[^@]{8,}@[^\s"\'<>]+'), "MySQL connection string with credentials", "HIGH", False, 0),
+    (re.compile(r'redis://:[^@]{8,}@[^\s"\'<>]+'), "Redis connection string with credentials", "HIGH", False, 0),
+    (re.compile(r'amqps?://[^:]+:[^@]{8,}@[^\s"\'<>]+'), "AMQP connection string with credentials", "HIGH", False, 0),
+
+    # ── Generic patterns: require entropy validation to reduce false positives ─
+    # These match keyword + value, but we gate them with entropy + placeholder checks
+    # Captures group 1 = the value portion
+    (
+        re.compile(r'(?i)(?:api[_-]?key|apikey)\s*[:=]\s*["\']?([A-Za-z0-9_\-]{20,})["\']?'),
+        "Generic API key", "HIGH", True, 3.5
+    ),
+    (
+        re.compile(r'(?i)(?:secret[_-]?key|secretkey)\s*[:=]\s*["\']?([A-Za-z0-9_\-+/=]{20,})["\']?'),
+        "Secret key", "HIGH", True, 3.5
+    ),
+    (
+        re.compile(r'(?i)(?:access[_-]?token|accesstoken)\s*[:=]\s*["\']?([A-Za-z0-9_\-\.]{20,})["\']?'),
+        "Access token", "HIGH", True, 3.5
+    ),
+    (
+        re.compile(r'(?i)(?:client[_-]?secret|clientsecret)\s*[:=]\s*["\']?([A-Za-z0-9_\-]{20,})["\']?'),
+        "OAuth client secret", "HIGH", True, 3.5
+    ),
+    (
+        re.compile(r'(?i)(?:auth[_-]?token|authtoken)\s*[:=]\s*["\']?([A-Za-z0-9_\-\.]{20,})["\']?'),
+        "Auth token", "MEDIUM", True, 3.5
+    ),
+    # Password: higher entropy threshold + longer minimum to cut test/config noise
+    (
+        re.compile(r'(?i)password\s*[:=]\s*["\']([^"\']{12,})["\']'),
+        "Hardcoded password", "HIGH", True, 4.0
+    ),
+]
+
+
+# Extensions to skip entirely (binary / compiled / lock files with no secrets to scan)
+SKIP_EXTENSIONS = {
+    '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp',
+    '.pdf', '.zip', '.tar', '.gz', '.bz2', '.xz', '.7z',
+    '.exe', '.dll', '.so', '.dylib', '.bin', '.wasm',
+    '.pyc', '.pyo', '.class', '.o', '.a',
+    '.lock',                       # package-lock.json, yarn.lock etc.
+    '.min.js', '.min.css',         # minified — high entropy everywhere, useless
+}
+
+
+# Files whose names suggest they're test/example/fixture files — lower severity
+TEST_FILE_PATTERNS = re.compile(
+    r'(?i)(?:test|spec|mock|fixture|example|sample|demo|fake|stub)',
+    re.IGNORECASE
+)
+
+def check_api_keys(path: str) -> list[dict]:
     issues = []
-    patterns = [
-        (re.compile(r'AKIA[0-9A-Z]{16}'), "AWS access key"),
-        (re.compile(r'AIza[0-9A-Za-z_-]{35}'), "Google API key"),
-        (re.compile(r'(?i)api[_-]?key\s*[:=]\s*["\']?([A-Za-z0-9_\-]{16,})["\']?'), "API key"),
-        (re.compile(r'(?i)secret[_-]?key\s*[:=]\s*["\']?([^"\']+)["\']?'), "Secret key"),
-        (re.compile(r'(?i)client[_-]?secret\s*[:=]\s*["\']?([^"\']+)["\']?'), "Client secret"),
-        (re.compile(r'(?i)password\s*[:=]\s*["\']?([^"\']+)["\']?'), "Password"),
-        (re.compile(r'-----BEGIN (RSA )?PRIVATE KEY-----'), "Private key"),
-        (re.compile(r'(?i)mongodb(?:\+srv)?:\/\/[^\s"\']+'), "MongoDB connection string"),
-    ]
+
     for root, dirs, files in os.walk(path):
+        # Prune ignored directories in-place
         dirs[:] = [d for d in dirs if d not in IGNORE_FOLDERS]
+
         for file in files:
+            # Skip binary and generated files by extension
+            _, ext = os.path.splitext(file)
+            if ext.lower() in SKIP_EXTENSIONS or file.endswith(('.min.js', '.min.css')):
+                continue
+
             full_path = os.path.join(root, file)
+            rel_path = os.path.relpath(full_path, path)
+            in_test_file = bool(TEST_FILE_PATTERNS.search(file))
+
             try:
                 with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
+                    lines = f.readlines()
             except Exception:
                 continue
-            for regex, label in patterns:
-                if regex.search(content):
+
+            seen_labels_in_file = set()  # deduplicate: one report per secret type per file
+
+            for line_no, line in enumerate(lines, start=1):
+                # Skip comment lines — the #1 source of false positives
+                stripped = line.lstrip()
+                if stripped.startswith(('#', '//', '--', '/*', '*')):
+                    continue
+
+                for regex, label, severity, check_entropy, min_entropy in SECRET_PATTERNS:
+                    match = regex.search(line)
+                    if not match:
+                        continue
+
+                    # Extract the value to validate (group 1 if captured, else full match)
+                    value = match.group(1) if match.lastindex and match.lastindex >= 1 else match.group(0)
+
+                    # Gate 1: Placeholder check
+                    if is_placeholder(value):
+                        continue
+
+                    # Gate 2: Entropy check (only for generic keyword patterns)
+                    if check_entropy and shannon_entropy(value) < min_entropy:
+                        continue
+
+                    # Gate 3: Downgrade severity for test files
+                    effective_severity = "LOW" if in_test_file and severity == "HIGH" else severity
+
+                    # Gate 4: Deduplicate — only report the same label once per file
+                    dedup_key = (rel_path, label)
+                    if dedup_key in seen_labels_in_file:
+                        continue
+                    seen_labels_in_file.add(dedup_key)
+
                     issues.append({
                         "type": "SECURITY",
-                        "severity": "HIGH",
-                        "file": os.path.relpath(full_path, path),
-                        "line": None,
-                        "title": "Potential secret/API key exposed",
-                        "why": f"Detected a possible {label} in {file}.",
-                        "fix": "Remove the secret from source control, move it to environment variables, and rotate the key immediately."
+                        "severity": effective_severity,
+                        "file": rel_path,
+                        "line": line_no,
+                        "label": label,
+                        "title": f"Potential {label} exposed",
+                        "matched_value_preview": f"{value[:6]}{'*' * max(0, len(value) - 6)}",  # partial redaction
+                        "why": (
+                            f"Detected a possible {label} on line {line_no} of {file}. "
+                            f"Value has Shannon entropy {shannon_entropy(value):.2f}."
+                            if check_entropy else
+                            f"Detected a {label} matching a known vendor format on line {line_no} of {file}."
+                        ),
+                        "fix": (
+                            "Remove the secret from source control immediately. "
+                            "Move it to environment variables or a secrets manager (e.g. AWS Secrets Manager, HashiCorp Vault, Doppler). "
+                            "Rotate the key — treat it as compromised regardless of repository visibility."
+                        )
                     })
-                    break
+
     return issues
 
 # Rule 9: Unused File Detection
 
 def check_unused_files(path):
-    issues = []
+    issues = [] 
     candidate_files = []
     used_files = set()
     entry_basenames = {os.path.splitext(ef)[0] for ef in ENTRY_FILES}
