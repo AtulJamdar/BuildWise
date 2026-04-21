@@ -21,18 +21,27 @@ export default function OAuthSuccess() {
 
       const checkOnboarding = async () => {
         try {
-          const res = await fetch("http://localhost:8000/user/profile", {
+          // ✨ NEW: Fetch user profile to get the current logged-in username
+          const profileRes = await fetch("http://localhost:8000/profile", {
             headers: {
               Authorization: `Bearer ${appToken}`,
             },
           });
 
-          if (!res.ok) {
-            throw new Error("Failed to fetch user onboarding status");
+          if (!profileRes.ok) {
+            throw new Error("Failed to fetch user profile");
           }
 
-          const user = await res.json();
-          if (user.is_onboarded) {
+          const userProfile = await profileRes.json();
+          
+          // 💾 SAVE USERNAME TO LOCALSTORAGE (This was missing!)
+          if (userProfile.name) {
+            localStorage.setItem("username", userProfile.name);
+            console.log("✅ Username saved to localStorage:", userProfile.name);
+          }
+
+          // Check onboarding status
+          if (userProfile.onboarding_done) {
             navigate("/dashboard");
           } else {
             navigate("/onboarding");

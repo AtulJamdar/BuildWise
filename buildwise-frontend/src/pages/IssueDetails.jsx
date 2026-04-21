@@ -298,10 +298,10 @@ try {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <div className="mt-6 grid gap-4 grid-cols-1">
           <div className="space-y-2 p-5 rounded-3xl bg-slate-50 border border-slate-100">
             <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">File</p>
-            <p className="text-sm font-semibold text-gray-900 break-all">{issue.repo_path || issue.file || "Unknown"}</p>
+            <p className="text-sm font-semibold text-gray-900 break-words overflow-hidden whitespace-normal">{issue.repo_path || issue.file || "Unknown"}</p>
           </div>
           <div className="space-y-2 p-5 rounded-3xl bg-slate-50 border border-slate-100">
             <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Location</p>
@@ -443,7 +443,7 @@ try {
     )}
     {/* --- THE VISUAL HACK END --- */}
 
-    <div className="mt-4 grid gap-4 lg:grid-cols-2">
+    <div className="mt-4 grid gap-4 grid-cols-1">
       <div>
         <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Original snippet</p>
         <pre className="mt-2 bg-white rounded-3xl p-4 text-sm text-gray-800 overflow-x-auto whitespace-pre-wrap break-words">
@@ -522,7 +522,7 @@ try {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <div className="mt-6 grid gap-4 grid-cols-1">
           <div className="p-6 rounded-3xl bg-yellow-50 border border-yellow-200">
             <p className="text-xs uppercase tracking-widest text-yellow-700 font-bold">Why this is a problem</p>
             <p className="mt-3 text-sm text-yellow-900">{issue.why || "No explanation provided."}</p>

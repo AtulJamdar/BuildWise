@@ -870,7 +870,7 @@ const Dashboard = () => {
             </section>
           )}
 
-          <div className="grid lg:grid-cols-2 gap-8 items-start">
+          <div className="grid grid-cols-1 gap-8 items-start">
             <div className="space-y-8">
               {selectedScan && (
                 <section className="space-y-4">
