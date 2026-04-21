@@ -7,10 +7,10 @@ export default function Sidebar() {
   const isActive = (path) => location.pathname === path;
 
   const navClass = (path) =>
-    `w-full text-left rounded-xl px-4 py-3 transition ${isActive(path) ? "bg-white text-black dark:bg-white/10 dark:text-white" : "text-gray-300 hover:bg-white/10 dark:text-gray-400 dark:hover:bg-white/10"}`;
+    `w-full text-left rounded-xl px-4 py-3 transition ${isActive(path) ? "bg-white text-black" : "text-gray-300 hover:bg-white/10"}`;
 
   return (
-    <div className="w-64 h-screen bg-slate-900 dark:bg-slate-950 text-white flex flex-col justify-between p-4">
+    <div className="w-64 h-screen bg-slate-900 text-white flex flex-col justify-between p-4">
       <div>
         <h1 className="text-xl font-bold mb-6">BuildWise</h1>
 
