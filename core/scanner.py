@@ -53,7 +53,7 @@ def scan_project(path, project_name, user_id, repo_url=None, team_id=None, repo_
     try:
         # 1. Run Security Rules
         security_results = run_all_checks(path)
-        for issue in security_results:
+        for issue in security_results["issues"]:
             file_path = os.path.abspath(issue.get('file', ''))
             if file_path not in file_issue_map:
                 file_issue_map[file_path] = []

@@ -1,7 +1,6 @@
 import base64
 import os
 from pydoc import text
-from pydoc import text
 import re
 import difflib
 import json
@@ -606,7 +605,7 @@ def preview_fix(issue_id: int, data: dict = Body(...), user_id: int = Depends(ge
             }
         raise HTTPException(status_code=409, detail="Code has changed since the scan. Please rescan.")
 
-    new_code = generate_fix(issue)
+    new_code = generate_fix(issue, repo_path)
     new_lines = apply_fix(list(lines), exact_line, new_code)
 
     combined = "\n".join(new_lines)
@@ -685,7 +684,7 @@ def apply_fix_issue(issue_id: int, data: dict = Body(...), user_id: int = Depend
             raise HTTPException(status_code=409, detail="Multiple candidate matches found. Please choose the correct line first.")
         raise HTTPException(status_code=409, detail="Code has changed since the scan. Please rescan.")
 
-    new_code = generate_fix(issue)
+    new_code = generate_fix(issue, repo_path)
     new_lines = apply_fix(list(lines), exact_line, new_code)
     combined = "\n".join(new_lines)
     if not validate_code(combined, repo_path):
@@ -1684,3 +1683,5 @@ def get_github_repos(token: str = None):
     except Exception as e:
         print(f"❌ GitHub API Error: {e}")
         return []
+
+

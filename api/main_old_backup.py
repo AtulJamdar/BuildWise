@@ -1,34 +1,45 @@
 import base64
 import os
+from pydoc import text
+from pydoc import text
+import re
+import difflib
+import json
+import time
+from difflib import SequenceMatcher
+from fastapi import FastAPI, Body, HTTPException, Depends, status, Request
+from fastapi.middleware.cors import CORSMiddleware
+from groq import Groq
+from dotenv import load_dotenv
+from db.connection import get_connection
+from core.fix_engine import generate_fix, apply_fix, generate_diff, validate_code
+from core.project_service import get_or_create_project, get_user_projects, get_project_scans, verify_project_access, verify_issue_access, verify_scan_access
+
+# Import your local services
+from core.issue_service import get_scan_issues, get_issue_by_id, get_issue_repo_info, update_issue_status, assign_issue, get_issue_activity
+from core.scanner import scan_project
+from core.user_service import login_user, oauth_login_user, register_user, register_oauth_user, get_user_by_email, generate_reset_token, reset_password, get_user_plan_info, increment_scan_count
+from core.team_service import create_team, get_user_teams, add_member_to_team, user_is_team_member, get_team_by_id, get_team_projects as get_team_projects_for_team
+from utils.dependencies import get_current_user
+from utils.token import generate_invite_token
+from utils.email_service import send_invite_email, send_password_reset_email
+from core.repo_scanner import scan_github_repo
 import requests
 import razorpay
 import hmac
 import hashlib
-from fastapi import FastAPI, Body, HTTPException, Depends, Request
-from fastapi.middleware.cors import CORSMiddleware
 from authlib.integrations.starlette_client import OAuth
 from starlette.config import Config
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.responses import RedirectResponse
 from datetime import datetime, timezone
 
-from dotenv import load_dotenv
-from db.connection import get_connection
-from core.user_service import get_user_plan_info, increment_scan_count, oauth_login_user, register_oauth_user, get_user_by_email
-from core.team_service import user_is_team_member
-from core.scanner import scan_project
-from core.repo_scanner import scan_github_repo
-from api.database_setup import ensure_tables_exist
-from api.routers.auth import router as auth_router
-from api.routers.profile import router as profile_router
-from api.routers.projects import router as projects_router
-from api.routers.issues import router as issues_router
-from api.routers.teams import router as teams_router
 
 def get_env(key, default=None):
     value = os.getenv(key, default)
     return value.strip() if isinstance(value, str) else value
 
+client = Groq(api_key=get_env("GROQ_API_KEY"))
 RAZORPAY_KEY_ID = get_env("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = get_env("RAZORPAY_KEY_SECRET")
 GOOGLE_CLIENT_ID = get_env("GOOGLE_CLIENT_ID")
@@ -61,8 +72,13 @@ app.add_middleware(
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
+
+
+
 load_dotenv()
 config = Config(environ=os.environ)
+
+
 
 # Patch requests auth to support UTF-8 credentials if needed.
 import requests.auth
@@ -75,276 +91,13 @@ def _basic_auth_str_utf8(username, password):
 
 requests.auth._basic_auth_str = _basic_auth_str_utf8
 
+
+
 oauth = OAuth(config)
 oauth.register(
     name="google",
     client_id=GOOGLE_CLIENT_ID,
     client_secret=GOOGLE_CLIENT_SECRET,
-    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile"},
-)
-
-@app.on_event("startup")
-def ensure_tables_exist():
-    ensure_tables_exist()
-
-@app.get("/")
-def home():
-    return {"message": "BuildWise API is online"}
-
-# Include routers
-app.include_router(auth_router, prefix="/auth", tags=["auth"])
-app.include_router(profile_router, prefix="", tags=["profile"])
-app.include_router(projects_router, prefix="/projects", tags=["projects"])
-app.include_router(issues_router, prefix="/issues", tags=["issues"])
-app.include_router(teams_router, prefix="/teams", tags=["teams"])
-
-@app.post("/scan")
-async def run_security_scan(data: dict = Body(...), user_id: int = Depends(get_current_user)):
-    repo_url = data.get("repo_url")
-    gh_token = data.get("gh_token") or os.getenv("GITHUB_API_TOKEN")
-    team_id = data.get("team_id")
-
-    if not repo_url:
-        raise HTTPException(status_code=400, detail="Repository URL is required")
-
-    plan_info = get_user_plan_info(user_id)
-    if not plan_info:
-        raise HTTPException(status_code=404, detail="User plan not found")
-
-    trial_active = False
-    if plan_info.get("trial_ends"):
-        trial_ends = plan_info["trial_ends"]
-        if isinstance(trial_ends, str):
-            trial_ends = datetime.fromisoformat(trial_ends)
-        trial_active = datetime.now(timezone.utc) < trial_ends
-
-    if plan_info["plan"] != "team" and not trial_active:
-        if plan_info["scan_count"] >= plan_info["scan_limit"]:
-            raise HTTPException(status_code=403, detail="Scan limit reached. Upgrade your plan.")
-
-    if team_id:
-        if not user_is_team_member(user_id, team_id):
-            raise HTTPException(status_code=403, detail="You must be a team member to scan for this team.")
-
-    print(f"🔍 Scan request received for repo_url: {repo_url}, user_id: {user_id}, team_id: {team_id}")
-
-    try:
-        if "github.com" in repo_url:
-            print(f"🌍 Detected GitHub URL. Cloning and Scanning...")
-            result = scan_github_repo(repo_url, user_id, gh_token, team_id=team_id)
-        else:
-            project_name = repo_url.split("/")[-1]
-            result = scan_project(repo_url, project_name, user_id, repo_url, team_id=team_id)
-
-        if result.get("status") != "success":
-            print(f"❌ Scan failed: {result}")
-            raise HTTPException(status_code=500, detail=result.get("error") or "Scan failed")
-
-        increment_scan_count(user_id)
-
-        print(f"✅ Scan completed successfully: {result}")
-        return {"message": "Scan completed successfully", "details": result}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ Scan Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/create-order")
-def create_order(user_id: int = Depends(get_current_user)):
-    if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
-        raise HTTPException(status_code=500, detail="Razorpay configuration missing")
-
-    try:
-        order = razorpay_client.order.create({
-            "amount": 99900,
-            "currency": "INR",
-            "payment_capture": 1,
-            "notes": {"user_id": str(user_id)},
-        })
-
-        return {
-            "key_id": RAZORPAY_KEY_ID,
-            "order_id": order["id"],
-            "amount": order["amount"],
-            "currency": order["currency"],
-        }
-
-    except Exception as e:
-        msg = str(e)
-        print(f"🔥 Razorpay Order Error: {e}")
-        if "authentication" in msg.lower() or "401" in msg.lower():
-            raise HTTPException(
-                status_code=500,
-                detail="Razorpay authentication failed. Check RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET."
-            )
-        raise HTTPException(status_code=500, detail=msg)
-
-@app.post("/verify-payment")
-def verify_payment(data: dict = Body(...), user_id: int = Depends(get_current_user)):
-    order_id = data.get("order_id")
-    payment_id = data.get("payment_id")
-    signature = data.get("signature")
-
-    if not order_id or not payment_id or not signature:
-        raise HTTPException(status_code=400, detail="Missing payment details")
-
-    if not RAZORPAY_KEY_SECRET:
-        raise HTTPException(status_code=500, detail="Razorpay configuration missing")
-
-    generated_signature = hmac.new(
-        bytes(RAZORPAY_KEY_SECRET, "utf-8"),
-        bytes(f"{order_id}|{payment_id}", "utf-8"),
-        hashlib.sha256
-    ).hexdigest()
-
-    if generated_signature != signature:
-        raise HTTPException(status_code=400, detail="Payment verification failed")
-
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "UPDATE users SET plan=%s, scan_limit=%s WHERE id=%s",
-        ("pro", 100, user_id)
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return {"message": "Payment successful, plan upgraded"}
-
-# --- 🐙 GITHUB OAUTH ENDPOINTS ---
-
-@app.get("/auth/google")
-async def google_login(request: Request):
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        raise HTTPException(status_code=500, detail="Google OAuth configuration missing")
-    redirect_uri = GOOGLE_REDIRECT_URI
-    print(f"🔁 Google login redirect_uri: {redirect_uri}")
-    return await oauth.google.authorize_redirect(request, redirect_uri)
-
-@app.get("/auth/google/callback")
-async def google_callback(request: Request):
-    token = await oauth.google.authorize_access_token(request)
-    user = token.get("userinfo")
-
-    if not user:
-        try:
-            user = await oauth.google.parse_id_token(request, token)
-        except Exception as parse_err:
-            print(f"❌ Google ID token parse failed: {parse_err}")
-            raise HTTPException(status_code=400, detail="Unable to parse Google user info")
-
-    email = user.get("email")
-    name = user.get("name") or user.get("email") or "Google User"
-
-    if not email:
-        raise HTTPException(status_code=400, detail="Google did not return an email")
-
-    register_user(name, email, "google_user")
-    auth_data = oauth_login_user(email)
-    if auth_data and "access_token" in auth_data:
-        app_token = auth_data.get("access_token")
-    else:
-        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=auth_failed")
-
-    return RedirectResponse(url=f"{FRONTEND_URL}/oauth-success?token={app_token}")
-
-@app.get("/auth/github")
-def github_login():
-    client_id = os.getenv("GITHUB_CLIENT_ID")
-    redirect_uri = GITHUB_REDIRECT_URI
-    # Request access to repo scope so private repositories can be listed and cloned
-    url = f"https://github.com/login/oauth/authorize?client_id={client_id}&redirect_uri={redirect_uri}&scope=repo%20user:email"
-    return {"url": url}
-
-@app.get("/auth/github/callback")
-def github_callback(code: str):
-    client_id = os.getenv("GITHUB_CLIENT_ID")
-    client_secret = os.getenv("GITHUB_CLIENT_SECRET")
-
-    # 1. Exchange code for GitHub Access Token
-    token_res = requests.post(
-        "https://github.com/login/oauth/access_token",
-        headers={"Accept": "application/json"},
-        data={
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "code": code,
-        },
-    )
-    access_token = token_res.json().get("access_token")
-
-    if not access_token:
-        raise HTTPException(status_code=400, detail="Failed to retrieve access token from GitHub")
-
-    # 2. Get User Info from GitHub API
-    user_res = requests.get(
-        "https://api.github.com/user",
-        headers={"Authorization": f"token {access_token}"}
-    )
-    user_data = user_res.json()
-
-    # Handle cases where email might be private
-    email = user_data.get("email") or f"{user_data.get('login')}@github.com"
-    name = user_data.get("name") or user_data.get("login")
-
-    # 3. Register the user if they do not already exist.
-    user_exists = get_user_by_email(email)
-    if not user_exists:
-        result = register_oauth_user(name, email, "github_oauth_dummy_pass")
-        if not result.get("success"):
-            print(f"OAuth user creation warning: {result.get('message')}")
-
-    # 4. Generate our BUILDWISE app JWT token without requiring the password if the user already exists.
-    auth_data = oauth_login_user(email)
-    
-    if auth_data and "access_token" in auth_data:
-        app_token = auth_data.get("access_token")
-    else:
-        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=auth_failed")
-
-    return RedirectResponse(
-        url=f"{FRONTEND_URL}/oauth-success?token={app_token}&gh_token={access_token}"
-    )
-
-@app.get("/github/repos")
-def get_github_repos(token: str = None):
-    """
-    Fetches the list of repositories for the authenticated GitHub user.
-    """
-    # Note: 'token' here is the GitHub access token, not our app JWT
-    token = token or os.getenv("GITHUB_API_TOKEN")
-    if not token:
-        return []
-
-    headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
-    
-    try:
-        # Fetch up to 100 recent repos
-        response = requests.get(
-            "https://api.github.com/user/repos?sort=updated&per_page=100", 
-            headers=headers
-        )
-        
-        if response.status_code != 200:
-            return []
-
-        repos = response.json()
-        # Clean the data to only send what the frontend needs
-        return [
-            {
-                "name": r["full_name"],
-                "url": r["clone_url"],
-                "private": r.get("private", False),
-            }
-            for r in repos
-        ]
-    except Exception as e:
-        print(f"❌ GitHub API Error: {e}")
-        return []
     server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
     client_kwargs={"scope": "openid email profile"},
 )
