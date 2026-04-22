@@ -6,218 +6,271 @@ export default function Landing() {
   const { t } = useTranslation();
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <div className="mx-auto max-w-7xl px-6 py-6">
-        <nav className="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-white font-semibold text-xl tracking-tight">{t("brand")}</div>
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => navigate("/login")}
-              className="text-sm text-gray-400 transition hover:text-white"
-            >
-              {t("nav.login")}
-            </button>
-            <button
-              onClick={() => navigate("/login")}
-              className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition hover:bg-gray-200"
-            >
-              {t("nav.getStarted")}
-            </button>
-          </div>
-        </nav>
-
-        <main>
-          <section className="mt-20 text-center">
-            <p className="text-sm uppercase tracking-[0.4em] text-gray-500">{t("hero.tagline")}</p>
-            <h1 className="mt-6 text-5xl font-semibold leading-tight text-white sm:text-6xl">
-              {t("hero.title")}
-            </h1>
-            <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-gray-400">
-              {t("hero.description")}
-            </p>
-            <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row sm:justify-center">
+    <div className="min-h-screen bg-white text-gray-900">
+      {/* Navigation */}
+      <nav className="border-b border-gray-100 bg-white">
+        <div className="mx-auto max-w-7xl px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="text-lg font-semibold text-gray-900 tracking-tight">{t("brand")}</div>
+            <div className="flex items-center gap-4">
               <button
                 onClick={() => navigate("/login")}
-                className="rounded-full bg-white px-8 py-3 text-sm font-semibold text-black transition hover:bg-gray-100"
+                className="text-sm text-gray-600 transition hover:text-gray-900"
               >
-                {t("hero.startScanning")}
+                {t("nav.login")}
               </button>
               <button
-                onClick={() => navigate("/plans")}
-                className="rounded-full border border-white/20 px-8 py-3 text-sm font-semibold text-gray-300 transition hover:border-white hover:text-white"
+                onClick={() => navigate("/login")}
+                className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
               >
-                {t("hero.viewPlans")}
+                {t("nav.getStarted")}
+              </button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <main>
+        {/* Hero Section */}
+        <section className="mx-auto max-w-7xl px-6 py-20 text-center">
+          <p className="text-sm font-medium uppercase tracking-wide text-blue-600">{t("hero.tagline")}</p>
+          <h1 className="mt-4 text-6xl font-bold leading-tight text-gray-900 sm:text-7xl">
+            {t("hero.title")}
+          </h1>
+          <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-gray-600">
+            {t("hero.description")}
+          </p>
+          <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <button
+              onClick={() => navigate("/login")}
+              className="rounded-lg bg-blue-600 px-8 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+            >
+              {t("hero.startScanning")}
+            </button>
+            <button
+              onClick={() => navigate("/plans")}
+              className="rounded-lg border border-gray-300 px-8 py-3 text-sm font-semibold text-gray-900 transition hover:border-gray-400 hover:bg-gray-50"
+            >
+              {t("hero.viewPlans")}
+            </button>
+          </div>
+
+          {/* Preview Cards */}
+          <div className="mt-16 grid gap-6 lg:grid-cols-3">
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-6 shadow-sm hover:shadow-md transition">
+              <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">Dashboard</p>
+              <div className="mt-4 space-y-2 rounded-lg border border-gray-200 bg-white p-3">
+                <div className="h-2.5 w-1/2 rounded bg-gray-300" />
+                <div className="h-2.5 w-3/4 rounded bg-gray-200" />
+                <div className="mt-3 grid gap-2">
+                  <div className="h-2 w-full rounded bg-gray-200" />
+                  <div className="h-2 w-5/6 rounded bg-gray-200" />
+                  <div className="h-2 w-2/3 rounded bg-gray-200" />
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-6 shadow-sm hover:shadow-md transition">
+              <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">Issue Tracking</p>
+              <div className="mt-4 space-y-2 rounded-lg border border-gray-200 bg-white p-3">
+                <div className="h-2.5 w-3/4 rounded bg-gray-300" />
+                <div className="h-2.5 w-1/4 rounded bg-gray-200" />
+                <div className="mt-3 space-y-2">
+                  <div className="h-2 w-full rounded bg-gray-200" />
+                  <div className="h-2 w-5/6 rounded bg-gray-200" />
+                  <div className="h-2 w-2/3 rounded bg-gray-200" />
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-6 shadow-sm hover:shadow-md transition">
+              <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">Scan Results</p>
+              <div className="mt-4 space-y-2 rounded-lg border border-gray-200 bg-white p-3">
+                <div className="h-2.5 w-1/2 rounded bg-gray-300" />
+                <div className="mt-3 grid gap-2">
+                  <div className="h-2 w-full rounded bg-gray-200" />
+                  <div className="h-2 w-5/6 rounded bg-gray-200" />
+                  <div className="h-2 w-2/3 rounded bg-gray-200" />
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-600">92</span>
+                  <span className="text-xs text-gray-600">Quality score</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Features Section */}
+        <section className="mx-auto max-w-7xl px-6 py-20">
+          <div className="text-center mb-14">
+            <h2 className="text-4xl font-bold text-gray-900">Everything you need in one place</h2>
+            <p className="mt-4 text-lg text-gray-600">Track issues, security risks, and improvements across all your projects.</p>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-3">
+            <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm hover:shadow-md transition">
+              <h3 className="text-lg font-semibold text-gray-900">Project Overview</h3>
+              <p className="mt-2 text-gray-600">A unified view of all scans, issues, and team activity in one dashboard.</p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm hover:shadow-md transition">
+              <h3 className="text-lg font-semibold text-gray-900">Issue Tracking</h3>
+              <p className="mt-2 text-gray-600">View priority, status, and fix guidance instantly for every issue.</p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm hover:shadow-md transition">
+              <h3 className="text-lg font-semibold text-gray-900">Security Insights</h3>
+              <p className="mt-2 text-gray-600">Detect exposed secrets and vulnerable code before they reach production.</p>
+            </div>
+          </div>
+        </section>
+
+        {/* How It Works Section */}
+        <section className="mx-auto max-w-7xl px-6 py-20 border-t border-gray-200">
+          <div className="text-center mb-14">
+            <h2 className="text-4xl font-bold text-gray-900">How BuildWise works</h2>
+          </div>
+
+          <div className="flex flex-col items-center gap-8 rounded-xl border border-gray-200 bg-white p-8 sm:flex-row sm:justify-between sm:gap-4">
+            {["GitHub", "Scanner", "AI", "Report", "Dashboard"].map((step, index) => (
+              <div key={step} className="flex flex-col items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-100 text-sm font-semibold text-blue-600">
+                  {index + 1}
+                </div>
+                <p className="text-sm font-semibold text-gray-900 text-center">{step}</p>
+                {index < 4 && <div className="hidden h-1 w-12 bg-gray-300 sm:block" />}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Problem Solution Section */}
+        <section className="mx-auto max-w-7xl px-6 py-20">
+          <div className="text-center mb-14">
+            <h2 className="text-4xl font-bold text-gray-900">The Challenge</h2>
+          </div>
+
+          <div className="grid gap-8 lg:grid-cols-2">
+            <div className="rounded-xl border border-red-200 bg-red-50 p-8">
+              <p className="text-lg font-semibold text-red-700">Code reviews are inconsistent and expensive</p>
+              <p className="mt-3 text-gray-700">
+                Teams spend hours on repetitive reviews, often missing security gaps, hidden bugs, and architectural issues.
+              </p>
+            </div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-8">
+              <p className="text-lg font-semibold text-blue-700">BuildWise automates discovery</p>
+              <p className="mt-3 text-gray-700">
+                AI-powered scans surface issues instantly, explain fixes, and make every review faster, safer, and aligned with best practices.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Security Section */}
+        <section className="mx-auto max-w-7xl px-6 py-20 border-t border-gray-200">
+          <div className="text-center mb-14">
+            <h2 className="text-4xl font-bold text-gray-900">Built for security</h2>
+            <p className="mt-4 text-lg text-gray-600">Detect exposed secrets and vulnerabilities before attackers do.</p>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-3">
+            <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm hover:shadow-md transition">
+              <h3 className="font-semibold text-gray-900">Secret Scanning</h3>
+              <p className="mt-2 text-gray-600">Find credentials and tokens accidentally committed to your code.</p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm hover:shadow-md transition">
+              <h3 className="font-semibold text-gray-900">Vulnerability Detection</h3>
+              <p className="mt-2 text-gray-600">Flag common security issues in dependencies and configuration files.</p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm hover:shadow-md transition">
+              <h3 className="font-semibold text-gray-900">Audit-Ready Reports</h3>
+              <p className="mt-2 text-gray-600">Share secure findings with engineers and leadership easily.</p>
+            </div>
+          </div>
+        </section>
+
+        {/* Pricing Section */}
+        <section className="mx-auto max-w-7xl px-6 py-20 border-t border-gray-200">
+          <div className="text-center mb-14">
+            <h2 className="text-4xl font-bold text-gray-900">Simple, transparent pricing</h2>
+            <p className="mt-4 text-lg text-gray-600">Free for individuals. Powerful for teams.</p>
+          </div>
+
+          <div className="flex flex-col items-center justify-center gap-6 lg:flex-row">
+            <div className="rounded-xl border border-gray-200 bg-white p-8 shadow-sm w-full lg:w-80">
+              <p className="text-sm font-semibold uppercase tracking-wide text-gray-600">Free</p>
+              <p className="mt-4 text-3xl font-bold text-gray-900">$0</p>
+              <p className="mt-2 text-gray-600">Perfect to get started</p>
+              <ul className="mt-6 space-y-3 text-sm text-gray-700">
+                <li>✓ 10 scans/month</li>
+                <li>✓ Basic insights</li>
+                <li>✓ 1 project</li>
+              </ul>
+              <button
+                onClick={() => navigate("/login")}
+                className="mt-6 w-full rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-900 transition hover:bg-gray-50"
+              >
+                Get Started Free
               </button>
             </div>
 
-            <div className="mt-16 rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-[0_30px_80px_rgba(255,255,255,0.04)] backdrop-blur-sm">
-              <div className="grid gap-6 lg:grid-cols-3">
-                <div className="rounded-3xl bg-slate-950 p-5 text-left shadow-xl transition duration-500 hover:-translate-y-1">
-                  <p className="text-sm uppercase tracking-[0.35em] text-cyan-400">Dashboard</p>
-                  <div className="mt-5 space-y-3 rounded-3xl border border-white/10 bg-[#020617] p-4">
-                    <div className="h-3 w-1/2 rounded-full bg-white/20" />
-                    <div className="h-3 w-3/4 rounded-full bg-white/10" />
-                    <div className="mt-4 grid gap-3">
-                      <div className="h-3 w-full rounded-full bg-white/10" />
-                      <div className="h-3 w-5/6 rounded-full bg-white/10" />
-                      <div className="h-3 w-2/3 rounded-full bg-white/10" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-3xl bg-slate-950 p-5 text-left shadow-xl transition duration-500 hover:-translate-y-1">
-                  <p className="text-sm uppercase tracking-[0.35em] text-cyan-400">Issue page</p>
-                  <div className="mt-5 space-y-3 rounded-3xl border border-white/10 bg-[#020617] p-4">
-                    <div className="h-3 w-3/4 rounded-full bg-white/20" />
-                    <div className="h-3 w-1/4 rounded-full bg-white/10" />
-                    <div className="mt-4 space-y-2">
-                      <div className="h-2.5 w-full rounded-full bg-white/10" />
-                      <div className="h-2.5 w-5/6 rounded-full bg-white/10" />
-                      <div className="h-2.5 w-2/3 rounded-full bg-white/10" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-3xl bg-slate-950 p-5 text-left shadow-xl transition duration-500 hover:-translate-y-1">
-                  <p className="text-sm uppercase tracking-[0.35em] text-cyan-400">Scan results</p>
-                  <div className="mt-5 space-y-3 rounded-3xl border border-white/10 bg-[#020617] p-4">
-                    <div className="h-3 w-1/2 rounded-full bg-white/20" />
-                    <div className="mt-4 grid gap-2">
-                      <div className="h-2.5 w-full rounded-full bg-white/10" />
-                      <div className="h-2.5 w-5/6 rounded-full bg-white/10" />
-                      <div className="h-2.5 w-2/3 rounded-full bg-white/10" />
-                    </div>
-                    <div className="mt-4 flex items-center gap-2">
-                      <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-cyan-500/20 text-sm text-cyan-300">92</span>
-                      <span className="text-sm text-gray-400">Quality score</span>
-                    </div>
-                  </div>
-                </div>
+            <div className="rounded-xl border-2 border-blue-600 bg-blue-50 p-8 shadow-md w-full lg:w-80 relative">
+              <div className="absolute -top-4 left-6 bg-blue-600 text-white px-3 py-1 rounded-full text-xs font-semibold">
+                Most Popular
               </div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">Pro</p>
+              <p className="mt-4 text-3xl font-bold text-gray-900">₹999<span className="text-lg text-gray-600">/month</span></p>
+              <p className="mt-2 text-gray-700">For growing teams</p>
+              <ul className="mt-6 space-y-3 text-sm text-gray-700">
+                <li>✓ 100 scans/month</li>
+                <li>✓ Team features</li>
+                <li>✓ Unlimited projects</li>
+                <li>✓ Priority support</li>
+              </ul>
+              <button
+                onClick={() => navigate("/login")}
+                className="mt-6 w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+              >
+                Start Free Trial
+              </button>
             </div>
-          </section>
+          </div>
+        </section>
 
-          <section className="mt-32 text-center">
-            <h2 className="text-3xl font-semibold text-white">See everything in one place</h2>
-            <p className="mx-auto mt-4 max-w-3xl text-gray-400">
-              Track issues, security risks, and suggestions across your projects in a clean dashboard.
-            </p>
-            <div className="mt-10 grid gap-6 lg:grid-cols-3">
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-left shadow-xl">
-                <div className="mb-4 h-2.5 w-24 rounded-full bg-cyan-400/20" />
-                <h3 className="text-xl font-semibold text-white">Project overview</h3>
-                <p className="mt-3 text-gray-400">A single view for all scans, issues and team activity.</p>
-              </div>
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-left shadow-xl">
-                <div className="mb-4 h-2.5 w-24 rounded-full bg-cyan-400/20" />
-                <h3 className="text-xl font-semibold text-white">Issue tracking</h3>
-                <p className="mt-3 text-gray-400">See priority, status, and fix guidance instantly.</p>
-              </div>
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-left shadow-xl">
-                <div className="mb-4 h-2.5 w-24 rounded-full bg-cyan-400/20" />
-                <h3 className="text-xl font-semibold text-white">Security insights</h3>
-                <p className="mt-3 text-gray-400">Spot exposed secrets and vulnerable code before release.</p>
-              </div>
-            </div>
-          </section>
-
-          <section className="mt-32 text-center">
-            <h2 className="text-3xl font-semibold text-white">How BuildWise works</h2>
-            <div className="mx-auto mt-10 flex max-w-5xl flex-col items-center gap-4 rounded-3xl border border-white/10 bg-white/5 p-8 text-left shadow-xl sm:flex-row sm:justify-between">
-              {[
-                "GitHub",
-                "Scanner",
-                "AI",
-                "Report",
-                "Dashboard",
-              ].map((step, index) => (
-                <div key={step} className="flex flex-1 flex-col items-center gap-3">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-950 text-sm font-semibold text-cyan-300">
-                    {index + 1}
-                  </div>
-                  <p className="text-sm font-semibold text-white">{step}</p>
-                  {index < 4 && <div className="h-0.5 w-16 bg-white/20 sm:block" />}
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="mt-32 text-center">
-            <h2 className="text-3xl font-semibold text-white">Problem → Solution</h2>
-            <div className="mx-auto mt-10 grid gap-6 lg:grid-cols-2">
-              <div className="rounded-3xl border border-red-500/20 bg-red-500/5 p-8">
-                <p className="text-lg font-semibold text-red-300">Code reviews are inconsistent and expensive.</p>
-                <p className="mt-4 text-gray-400">
-                  Teams spend hours on repetitive reviews and still miss security gaps, hidden bugs, or bad architecture.
-                </p>
-              </div>
-              <div className="rounded-3xl border border-cyan-500/20 bg-cyan-500/5 p-8">
-                <p className="text-lg font-semibold text-cyan-200">BuildWise automates discovery and remediation.</p>
-                <p className="mt-4 text-gray-400">
-                  AI-powered scans surface issues, explain fixes, and make every review faster, safer, and aligned.
-                </p>
-              </div>
-            </div>
-          </section>
-
-          <section className="mt-32 text-center">
-            <h2 className="text-3xl font-semibold text-white">Built with security in mind</h2>
-            <p className="mx-auto mt-4 max-w-3xl text-gray-400">
-              Detect exposed API keys, insecure configuration, and vulnerabilities before attackers do.
-            </p>
-            <div className="mt-10 grid gap-6 lg:grid-cols-3">
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-left shadow-xl">
-                <h3 className="font-semibold text-white">Secret scanning</h3>
-                <p className="mt-3 text-gray-400">Find credentials and tokens accidentally committed to code.</p>
-              </div>
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-left shadow-xl">
-                <h3 className="font-semibold text-white">Vulnerability checks</h3>
-                <p className="mt-3 text-gray-400">Flag common security issues in dependencies and config.</p>
-              </div>
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-left shadow-xl">
-                <h3 className="font-semibold text-white">Audit-ready reports</h3>
-                <p className="mt-3 text-gray-400">Share secure findings with engineers and leadership.</p>
-              </div>
-            </div>
-          </section>
-
-          <section className="mt-32 text-center">
-            <h2 className="text-3xl font-semibold text-white">Simple pricing</h2>
-            <p className="mx-auto mt-4 max-w-3xl text-gray-400">
-              Free for individuals. Powerful for teams. Transparent pricing that scales with usage.
-            </p>
-            <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-left shadow-xl">
-                <p className="text-sm uppercase tracking-[0.35em] text-gray-400">Free</p>
-                <p className="mt-4 text-3xl font-semibold text-white">0</p>
-                <p className="mt-3 text-gray-400">10 scans / month · Basic insights</p>
-              </div>
-              <div className="rounded-3xl border border-white/10 bg-cyan-500/10 p-6 text-left shadow-xl">
-                <p className="text-sm uppercase tracking-[0.35em] text-cyan-200">Pro</p>
-                <p className="mt-4 text-3xl font-semibold text-white">₹999</p>
-                <p className="mt-3 text-gray-400">100 scans / month · Team features</p>
-              </div>
-            </div>
+        {/* Final CTA Section */}
+        <section className="mx-auto max-w-7xl px-6 py-20 text-center border-t border-gray-200">
+          <h2 className="text-4xl font-bold text-gray-900">Ready to improve your code quality?</h2>
+          <p className="mt-4 text-lg text-gray-600">Start scanning your code today. No credit card required.</p>
+          <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <button
+              onClick={() => navigate("/login")}
+              className="rounded-lg bg-blue-600 px-8 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+            >
+              Start Free Scan
+            </button>
             <button
               onClick={() => navigate("/plans")}
-              className="mt-8 rounded-full bg-white px-8 py-3 text-sm font-semibold text-black transition hover:bg-gray-100"
+              className="rounded-lg border border-gray-300 px-8 py-3 text-sm font-semibold text-gray-900 transition hover:border-gray-400 hover:bg-gray-50"
             >
-              View Plans →
+              View Pricing
             </button>
-          </section>
+          </div>
+        </section>
 
-          <section className="mt-32 text-center mb-20 border-t border-white/10 pt-10 text-gray-400">
-            <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-              <p>© 2026 BuildWise</p>
-              <div className="flex flex-wrap gap-4 text-sm text-gray-400">
-                <a href="#" className="transition hover:text-white">GitHub</a>
-                <a href="#" className="transition hover:text-white">LinkedIn</a>
-                <a href="#" className="transition hover:text-white">Contact</a>
+        {/* Footer */}
+        <footer className="border-t border-gray-200 bg-gray-50">
+          <div className="mx-auto max-w-7xl px-6 py-12">
+            <div className="flex flex-col gap-8 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-gray-600">© 2026 BuildWise. All rights reserved.</p>
+              <div className="flex flex-wrap gap-6 text-sm text-gray-600">
+                <a href="#" className="transition hover:text-gray-900">GitHub</a>
+                <a href="#" className="transition hover:text-gray-900">LinkedIn</a>
+                <a href="#" className="transition hover:text-gray-900">Contact</a>
+                <a href="#" className="transition hover:text-gray-900">Privacy</a>
               </div>
             </div>
-          </section>
-        </main>
-      </div>
+          </div>
+        </footer>
+      </main>
     </div>
   );
 }
