@@ -1,5 +1,6 @@
 import json
 from db.connection import get_connection
+from core.db_utils import execute_query, execute_update, verify_access
 
 
 def log_issue_activity(issue_id, action, user_id=None, details=None):
@@ -62,10 +63,8 @@ def assign_issue(issue_id, assignee_id, user_id=None):
 
 
 def get_scan_issues(scan_id):
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute(
+    """Fetch all issues for a scan."""
+    return execute_query(
         """
         SELECT id, file, severity, title, status, note, assigned_to
         FROM issues
@@ -75,19 +74,10 @@ def get_scan_issues(scan_id):
         (scan_id,)
     )
 
-    issues = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return issues
-
 
 def get_issue_activity(issue_id):
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute(
+    """Fetch activity log for an issue."""
+    return execute_query(
         """
         SELECT ia.action, ia.details, ia.created_at, u.username
         FROM issue_activity ia
@@ -98,19 +88,10 @@ def get_issue_activity(issue_id):
         (issue_id,)
     )
 
-    activity = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return activity
-
 
 def get_issue_repo_info(issue_id):
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute(
+    """Fetch repository information for an issue."""
+    return execute_query(
         """
         SELECT
             p.repo_url,
@@ -122,13 +103,9 @@ def get_issue_repo_info(issue_id):
         JOIN projects p ON p.id = r.project_id
         WHERE i.id = %s
         """,
-        (issue_id,)
+        (issue_id,),
+        fetch_one=True
     )
-
-    repo_info = cur.fetchone()
-    cur.close()
-    conn.close()
-    return repo_info
 
 
 def get_issue_by_id(issue_id):
@@ -168,33 +145,39 @@ def get_issue_by_id(issue_id):
     issue = cur.fetchone()
 
     if issue:
-        return (
-            issue[0], issue[1], issue[2], issue[3], issue[4], issue[5], issue[6], issue[7], issue[8], issue[9], issue[10], issue[11], issue[12], issue[13], issue[14], issue[15],
-            json.loads(issue[16]) if issue[16] else None,
-            json.loads(issue[17]) if issue[17] else None,
-            issue[18]
-        )
+        # Convert tuple to dictionary using column names
+        return {
+            "id": issue[0],
+            "file": issue[1],
+            "line": issue[2],
+            "code": issue[3],
+            "type": issue[4],
+            "severity": issue[5],
+            "title": issue[6],
+            "why": issue[7],
+            "fix": issue[8],
+            "status": issue[9],
+            "note": issue[10],
+            "assigned_to": issue[11],
+            "assigned_to_name": issue[12],
+            "updated_by": issue[13],
+            "updated_by_name": issue[14],
+            "fingerprint": issue[15],
+            "context_before": json.loads(issue[16]) if issue[16] else None,
+            "context_after": json.loads(issue[17]) if issue[17] else None,
+            "repo_path": issue[18]
+        }
+
+    cur.close()
+    conn.close()
 
     return None
 
-    cur.close()
-    conn.close()
-
-    return issue
-
 
 def find_issue_by_fingerprint(project_id, fingerprint):
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute(
+    """Find issue by fingerprint to detect duplicates."""
+    return execute_query(
         "SELECT id, status, assigned_to FROM issues WHERE project_id = %s AND fingerprint = %s",
-        (project_id, fingerprint)
+        (project_id, fingerprint),
+        fetch_one=True
     )
-
-    result = cur.fetchone()
-
-    cur.close()
-    conn.close()
-
-    return result

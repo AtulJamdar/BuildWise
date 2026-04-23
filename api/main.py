@@ -535,10 +535,10 @@ def github_match_issue(issue_id: int, user_id: int = Depends(get_current_user)):
     lines = fetch_github_file_lines(owner, repo_name, repo_path, ref=branch)
 
     exact_line = robust_match(lines, {
-        "code": issue[3],
-        "context_before": issue[16],
-        "context_after": issue[17],
-        "line": issue[2],
+        "code": issue["code"],
+        "context_before": issue["context_before"],
+        "context_after": issue["context_after"],
+        "line": issue["line"],
     })
 
     matched = exact_line is not None
@@ -584,9 +584,9 @@ def preview_fix(issue_id: int, data: dict = Body(...), user_id: int = Depends(ge
     lines, sha, _ = get_github_file(owner, repo_name, repo_path, ref=ref, token=gh_token)
 
     issue = {
-        "code": issue_row[3],
-        "title": issue_row[6],
-        "line": issue_row[2],
+        "code": issue_row["code"],
+        "title": issue_row["title"],
+        "line": issue_row["line"],
         "repo_path": repo_path,
     }
 
@@ -663,9 +663,9 @@ def apply_fix_issue(issue_id: int, data: dict = Body(...), user_id: int = Depend
     
 
     issue = {
-        "code": issue_row[3],
-        "title": issue_row[6],
-        "line": issue_row[2],
+        "code": issue_row["code"],
+        "title": issue_row["title"],
+        "line": issue_row["line"],
         "repo_path": repo_path,
     }
 
@@ -707,23 +707,23 @@ def apply_fix_issue(issue_id: int, data: dict = Body(...), user_id: int = Depend
         branch_name,
         combined,
         sha,
-        f"Fix issue #{issue_id}: {issue_row[6]}",
+        f"Fix issue #{issue_id}: {issue_row['title']}",
         gh_token,
     )
 
     pr_body = (
         f"This PR fixes issue #{issue_id} detected by BuildWise.\n\n"
-        f"**Issue:** {issue_row[6]}\n"
+        f"**Issue:** {issue_row['title']}\n"
         f"**File:** {repo_path}\n"
         f"**Line:** {exact_line}\n"
-        f"**Why:** {issue_row[7]}\n\n"
+        f"**Why:** {issue_row['why']}\n\n"
         "Generated fix is minimal and shown in the dashboard preview."
     )
 
     pr = create_pull_request(
         owner,
         repo_name,
-        f"Fix issue #{issue_id}: {issue_row[6]}",
+        f"Fix issue #{issue_id}: {issue_row['title']}",
         branch_name,
         base_branch,
         pr_body,
@@ -851,15 +851,15 @@ def get_issue(issue_id: int, user_id: int = Depends(get_current_user)):
     # --- Debug issue data (VERY IMPORTANT) ---
     print("🔥 ISSUE DEBUG START")
     print(f"ID: {issue_id}")
-    print(f"DB CODE: {repr(issue[3])}")
-    print(f"LINE: {issue[2]}")
-    print(f"FILE: {issue[1]}")
+    print(f"DB CODE: {repr(issue['code'])}")
+    print(f"LINE: {issue['line']}")
+    print(f"FILE: {issue['file']}")
     print("🔥 ISSUE DEBUG END")
 
     # Original logging
-    print(f"📝 Fetching issue {issue_id}: File={issue[1]}, Line={issue[2]}, Title={issue[6]}")
+    print(f"📝 Fetching issue {issue_id}: File={issue['file']}, Line={issue['line']}, Title={issue['title']}")
 
-    code_snippet = issue[3]
+    code_snippet = issue["code"]
     github_match = None
     repo_info = get_issue_repo_info(issue_id)
 
@@ -871,7 +871,7 @@ def get_issue(issue_id: int, user_id: int = Depends(get_current_user)):
                 owner, repo_name = parsed
                 try:
                     lines = fetch_github_file_lines(owner, repo_name, repo_path, ref=branch)
-                    line_no = get_line_by_number(lines, {"line": issue[2]})
+                    line_no = get_line_by_number(lines, {"line": issue["line"]})
                     if line_no:
                         code_snippet = get_snippet(lines, line_no)
                         github_match = {
@@ -884,27 +884,27 @@ def get_issue(issue_id: int, user_id: int = Depends(get_current_user)):
 
     activity = get_issue_activity(issue_id)
     return {
-        "id": issue[0],
-        "file": issue[1],
-        "line": issue[2],
-        "code": issue[3],
+        "id": issue["id"],
+        "file": issue["file"],
+        "line": issue["line"],
+        "code": issue["code"],
         "code_snippet": code_snippet,
         "github_match": github_match,
-        "type": issue[4],
-        "severity": issue[5],
-        "title": issue[6],
-        "why": issue[7],
-        "fix": issue[8],
-        "status": issue[9],
-        "note": issue[10],
-        "assigned_to": issue[11],
-        "assigned_to_name": issue[12],
-        "updated_by": issue[13],
-        "updated_by_name": issue[14],
-        "fingerprint": issue[15],
-        "context_before": issue[16],
-        "context_after": issue[17],
-        "repo_path": issue[18],
+        "type": issue["type"],
+        "severity": issue["severity"],
+        "title": issue["title"],
+        "why": issue["why"],
+        "fix": issue["fix"],
+        "status": issue["status"],
+        "note": issue["note"],
+        "assigned_to": issue["assigned_to"],
+        "assigned_to_name": issue["assigned_to_name"],
+        "updated_by": issue["updated_by"],
+        "updated_by_name": issue["updated_by_name"],
+        "fingerprint": issue["fingerprint"],
+        "context_before": issue["context_before"],
+        "context_after": issue["context_after"],
+        "repo_path": issue["repo_path"],
         "activity": [
             {"action": a[0], "details": a[1], "created_at": str(a[2]), "user": a[3]} for a in activity
         ]

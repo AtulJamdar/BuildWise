@@ -151,11 +151,51 @@ def shannon_entropy(value):
     return entropy
 
 
+def is_hash_format(value):
+    """Check if value matches common hash formats (SHA-512, SHA-256, MD5, etc.)"""
+    # SHA-512: 128 hex chars (optionally prefixed with 'sha512-')
+    # SHA-256: 64 hex chars (optionally prefixed with 'sha256-')
+    # MD5: 32 hex chars
+    # Base64 encoded hashes often have '==' or '=' padding
+    
+    # Remove common hash prefixes
+    test_value = re.sub(r'^(sha512-|sha256-|sha384-|sha1-|md5-)', '', value)
+    
+    # Check for base64-encoded hash patterns (common in npm package-lock.json)
+    # SHA-512 in base64 is typically 88 chars ending with == 
+    if re.match(r'^[A-Za-z0-9+/]+={0,2}$', test_value) and len(test_value) >= 60:
+        return True
+    
+    # Check for hex-encoded hashes
+    # SHA-512: 128 hex chars
+    if re.match(r'^[a-fA-F0-9]{128}$', test_value):
+        return True
+    
+    # SHA-256: 64 hex chars
+    if re.match(r'^[a-fA-F0-9]{64}$', test_value):
+        return True
+    
+    # SHA-1: 40 hex chars
+    if re.match(r'^[a-fA-F0-9]{40}$', test_value):
+        return True
+    
+    # MD5: 32 hex chars
+    if re.match(r'^[a-fA-F0-9]{32}$', test_value):
+        return True
+    
+    return False
+
+
 def is_likely_secret_string(value):
     if len(value) < 20:
         return False
     if re.search(r'\s', value):
         return False
+    
+    # Exclude common hash formats (SHA-512, SHA-256, etc. from npm package-lock.json)
+    if is_hash_format(value):
+        return False
+    
     entropy = shannon_entropy(value)
     categories = 0
     if re.search(r'[a-z]', value):
