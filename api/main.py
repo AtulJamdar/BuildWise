@@ -819,11 +819,49 @@ def assign_issue_endpoint(issue_id: int, data: dict = Body(...), user_id: int = 
 
 # --- 🧠 AI SUGGESTIONS ---
 
-# --- AI SUGGESTIONS (Placeholder) ---
 @app.post("/ai/suggestions")
 def get_ai_suggestions(data: dict = Body(...), user_id: int = Depends(get_current_user)):
-    """Placeholder for AI suggestions endpoint. To be integrated with Groq/OpenAI."""
-    return {"suggestions": ["AI suggestions coming soon! Please check back later."]}
+    """Provide AI suggestions based on scan results. Free plan gets basic suggestions."""
+    try:
+        issues = data.get("issues", [])
+        user_plan = data.get("plan", "free")
+        
+        if not issues:
+            return {"suggestions": ["No issues detected in your code. Great job!"]}
+        
+        # Basic AI suggestions for all plans
+        suggestions = []
+        
+        for issue in issues:
+            issue_type = issue.get("type", "").lower()
+            severity = issue.get("severity", "")
+            file_name = issue.get("file", "")
+            
+            # Generate basic suggestions based on issue type
+            if "unused" in issue_type:
+                suggestions.append(f"🗑️ Remove unused code: {file_name} - Keeping unused code increases complexity and maintenance burden.")
+            elif "security" in issue_type.lower():
+                suggestions.append(f"🔒 Security Issue: {file_name} - Review this file for potential vulnerabilities and apply security best practices.")
+            elif "dependency" in issue_type.lower():
+                suggestions.append(f"📦 Dependency Issue: {file_name} - Consider updating or removing unnecessary dependencies to reduce bundle size.")
+            elif "duplicate" in issue_type.lower():
+                suggestions.append(f"📋 Code Duplication: {file_name} - Extract common logic into reusable functions or utilities.")
+            elif "complexity" in issue_type.lower():
+                suggestions.append(f"🔄 Complex Logic: {file_name} - Consider breaking down complex functions into smaller, more manageable pieces.")
+            else:
+                suggestions.append(f"✏️ Code Quality: {file_name} - Review and refactor for better maintainability and performance.")
+        
+        # Add plan-specific suggestions
+        if user_plan != "free":
+            suggestions.insert(0, "💡 Pro Plan Unlocked: You have access to advanced AI analysis and recommendations.")
+        else:
+            suggestions.append("⭐ Upgrade to Pro for advanced AI suggestions, detailed analysis, and team collaboration features.")
+        
+        return {"suggestions": suggestions}
+        
+    except Exception as e:
+        print(f"[AI Suggestions] ❌ Error: {str(e)}")
+        return {"suggestions": ["Unable to generate suggestions at this time. Please try again later."]}
     
 
 @app.post("/auth/onboarding")
@@ -1182,6 +1220,7 @@ async def run_security_scan(data: dict = Body(...), user_id: int = Depends(get_c
     if not plan_info:
         raise HTTPException(status_code=404, detail="User plan not found")
 
+    current_plan = plan_info["plan"].lower()
     trial_active = False
     if plan_info.get("trial_ends"):
         trial_ends = plan_info["trial_ends"]
@@ -1189,9 +1228,10 @@ async def run_security_scan(data: dict = Body(...), user_id: int = Depends(get_c
             trial_ends = datetime.fromisoformat(trial_ends)
         trial_active = datetime.now(timezone.utc) < trial_ends
 
-    if plan_info["plan"] != "team" and not trial_active:
+    # Scan limit check - Business and Team plans have unlimited scans
+    if current_plan not in ["business", "team"] and not trial_active:
         if plan_info["scan_count"] >= plan_info["scan_limit"]:
-            raise HTTPException(status_code=403, detail="Scan limit reached. Upgrade your plan.")
+            raise HTTPException(status_code=403, detail=f"Scan limit reached ({plan_info['scan_count']}/{plan_info['scan_limit']}). Upgrade to Pro or Business plan.")
 
     if team_id:
         if not user_is_team_member(user_id, team_id):
@@ -1279,15 +1319,89 @@ def verify_payment(data: dict = Body(...), user_id: int = Depends(get_current_us
     from db.connection import get_connection
     conn = get_connection()
     cur = conn.cursor()
+    
+    # Upgrade user to Pro plan (100 scans/month, no team features)
     cur.execute(
-        "UPDATE users SET plan=%s, scan_limit=%s WHERE id=%s",
-        ("pro", 100, user_id)
+        "UPDATE users SET plan=%s, scan_limit=%s, scan_count=%s WHERE id=%s",
+        ("pro", 100, 0, user_id)
     )
     conn.commit()
     cur.close()
     conn.close()
 
-    return {"message": "Payment successful, plan upgraded"}
+    return {"message": "Payment successful! You have been upgraded to Pro plan (100 scans/month)."}
+
+
+@app.post("/business-inquiry")
+def business_inquiry(data: dict = Body(...), user_id: int = Depends(get_current_user)):
+    """
+    Handle Business plan inquiries. Stores inquiry in DB and attempts to send email notification.
+    """
+    company_name = data.get("company_name", "")
+    team_size = data.get("team_size", "")
+    requirements = data.get("requirements", "")
+    
+    try:
+        from db.connection import get_connection
+        
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT email, username FROM users WHERE id=%s", (user_id,))
+        user_row = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if not user_row:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        user_email, username = user_row
+        
+        # Store inquiry in DB for tracking
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO business_inquiries (user_id, company_name, team_size, requirements, created_at)
+            VALUES (%s, %s, %s, %s, NOW())
+            """,
+            (user_id, company_name, team_size, requirements)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        # Attempt to send email notification (optional - won't fail if not configured)
+        try:
+            from utils.email_service import send_email
+            
+            admin_email = os.getenv("EMAIL_SENDER")
+            if admin_email:
+                email_body = f"""New Business Plan Inquiry:
+
+User: {username} ({user_email})
+Company: {company_name}
+Team Size: {team_size}
+Requirements: {requirements}
+
+Please contact the user with pricing details and next steps."""
+                
+                send_email(
+                    admin_email,
+                    "New BuildWise Business Plan Inquiry",
+                    email_body
+                )
+                print(f"[Business Inquiry] ✅ Email sent to admin for {username}")
+            else:
+                print(f"[Business Inquiry] ⚠️ Admin email not configured. Inquiry stored in DB only.")
+        except Exception as email_error:
+            print(f"[Business Inquiry] ⚠️ Email notification failed: {str(email_error)}. Inquiry still stored in DB.")
+        
+        print(f"[Business Inquiry] ✅ Inquiry received from {username}")
+        return {"message": "Thank you! We have received your inquiry. Our team will contact you shortly."}
+        
+    except Exception as e:
+        print(f"[Business Inquiry] ❌ Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # --- 🐙 GITHUB OAUTH ENDPOINTS ---

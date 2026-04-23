@@ -67,3 +67,22 @@ If you did not request this change, please ignore this message.
     server.login(EMAIL_SENDER, EMAIL_PASSWORD)
     server.sendmail(EMAIL_SENDER, to_email, msg.as_string())
     server.quit()
+
+
+def send_email(to_email: str, subject: str, body: str):
+    """Generic email sending function for notifications."""
+    if not EMAIL_SENDER or not EMAIL_PASSWORD:
+        raise ValueError("Email sender credentials are not configured in environment variables.")
+
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_SENDER
+    msg["To"] = to_email
+
+    server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+    server.ehlo()
+    server.starttls()
+    server.ehlo()
+    server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+    server.sendmail(EMAIL_SENDER, to_email, msg.as_string())
+    server.quit()
