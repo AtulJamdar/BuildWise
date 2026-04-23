@@ -6,11 +6,16 @@ import difflib
 import json
 import time
 from difflib import SequenceMatcher
+
 from fastapi import FastAPI, Body, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
-from groq import Groq
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
+
+# --- FastAPI App Initialization ---
+app = FastAPI(title="BuildWise API")
 from dotenv import load_dotenv
 from db.connection import get_connection
 from core.fix_engine import generate_fix, apply_fix, generate_diff, validate_code
@@ -30,7 +35,6 @@ import razorpay
 import hmac
 import hashlib
 from authlib.integrations.starlette_client import OAuth
-from starlette.config import Config
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.responses import RedirectResponse
 from datetime import datetime, timezone
@@ -40,192 +44,58 @@ def get_env(key, default=None):
     value = os.getenv(key, default)
     return value.strip() if isinstance(value, str) else value
 
-client = Groq(api_key=get_env("GROQ_API_KEY"))
+
+
 RAZORPAY_KEY_ID = get_env("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = get_env("RAZORPAY_KEY_SECRET")
+
 GOOGLE_CLIENT_ID = get_env("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = get_env("GOOGLE_CLIENT_SECRET")
-SECRET_KEY = get_env("SECRET_KEY", "supersecret")
-
-razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
-BACKEND_URL = get_env("BACKEND_URL", "http://localhost:8000")
-GITHUB_REDIRECT_URI = get_env("GITHUB_REDIRECT_URI", f"{BACKEND_URL}/auth/github/callback")
-GOOGLE_REDIRECT_URI = get_env("GOOGLE_REDIRECT_URI", f"{BACKEND_URL}/auth/google/callback")
+GOOGLE_REDIRECT_URI = get_env("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
+GITHUB_REDIRECT_URI = get_env("GITHUB_REDIRECT_URI", "http://localhost:8000/auth/github/callback")
 FRONTEND_URL = get_env("FRONTEND_URL", "http://localhost:5173")
 
-app = FastAPI(title="BuildWise API")
+# --- Razorpay Client ---
+razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
-# --- Cache-Control Middleware (FIX: Prevent browser caching of protected pages) ---
-class CacheControlMiddleware(BaseHTTPMiddleware):
-    """Adds Cache-Control headers to prevent caching of protected endpoints"""
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        # Protected routes should not be cached
-        protected_paths = ["/api/", "/projects", "/teams", "/issues", "/scans"]
-        if any(request.url.path.startswith(path) for path in protected_paths):
-            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, proxy-revalidate"
-            response.headers["Pragma"] = "no-cache"
-        return response
+# --- OAuth Setup (Manual Registration) ---
+oauth = OAuth()
+
+# Load environment variables
+load_dotenv()
+
+# Register Google OAuth
+if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    oauth.register(
+        name='google',
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+        client_kwargs={'scope': 'openid profile email'},
+    )
+    print("✅ Google OAuth registered successfully")
+else:
+    print("⚠️ WARNING: Google OAuth credentials not found in .env")
+
+# Register GitHub OAuth (optional, for future use if needed)
+GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
+GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
+if GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET:
+    print("✅ GitHub OAuth ready (manual flow)")
+else:
+    print("⚠️ WARNING: GitHub OAuth credentials not found in .env")
 
 # --- CORS Configuration ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        FRONTEND_URL,
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:4173",
-        "http://127.0.0.1:4173",
-    ],
+    allow_origins=[FRONTEND_URL, "http://localhost:5173", "http://localhost:3000"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
-    expose_headers=["*"],
 )
 
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
-app.add_middleware(CacheControlMiddleware)
-
-
-
-
-load_dotenv()
-config = Config(environ=os.environ)
-
-
-
-# Patch requests auth to support UTF-8 credentials if needed.
-import requests.auth
-
-def _basic_auth_str_utf8(username, password):
-    username_bytes = username.encode("utf-8") if isinstance(username, str) else username
-    password_bytes = password.encode("utf-8") if isinstance(password, str) else password
-    user_pass = base64.b64encode(username_bytes + b":" + password_bytes).decode("latin1")
-    return "Basic %s" % user_pass
-
-requests.auth._basic_auth_str = _basic_auth_str_utf8
-
-
-
-oauth = OAuth(config)
-oauth.register(
-    name="google",
-    client_id=GOOGLE_CLIENT_ID,
-    client_secret=GOOGLE_CLIENT_SECRET,
-    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile"},
-)
-
-
-
-@app.on_event("startup")
-def ensure_tables_exist():
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS invitations (
-                id SERIAL PRIMARY KEY,
-                team_id INT NOT NULL,
-                email TEXT NOT NULL,
-                token TEXT NOT NULL UNIQUE,
-                status TEXT DEFAULT 'pending'
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS password_resets (
-                id SERIAL PRIMARY KEY,
-                email TEXT NOT NULL,
-                token TEXT NOT NULL UNIQUE,
-                expires_at TIMESTAMP WITH TIME ZONE NOT NULL
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS projects (
-                id SERIAL PRIMARY KEY,
-                project_name TEXT,
-                user_id INT,
-                repo_url TEXT,
-                team_id INT
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS reports (
-                id SERIAL PRIMARY KEY,
-                project_id INT,
-                score INT,
-                summary TEXT,
-                commit_sha TEXT,
-                branch TEXT,
-                created_at TIMESTAMP DEFAULT NOW()
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS issues (
-                id SERIAL PRIMARY KEY,
-                project_id INT,
-                scan_id INT,
-                fingerprint TEXT,
-                file TEXT,
-                repo_path TEXT,
-                line INT,
-                code TEXT,
-                type TEXT,
-                severity TEXT,
-                title TEXT,
-                why TEXT,
-                fix TEXT,
-                status TEXT DEFAULT 'OPEN',
-                note TEXT,
-                context_before TEXT,
-                context_after TEXT,
-                assigned_to INT,
-                updated_by INT,
-                created_at TIMESTAMP DEFAULT NOW(),
-                updated_at TIMESTAMP DEFAULT NOW(),
-                last_seen_at TIMESTAMP DEFAULT NOW()
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS issue_activity (
-                id SERIAL PRIMARY KEY,
-                issue_id INT,
-                action TEXT,
-                user_id INT,
-                details TEXT,
-                created_at TIMESTAMP DEFAULT NOW()
-            )
-            """
-        )
-        cur.execute("ALTER TABLE issue_activity ADD COLUMN IF NOT EXISTS details TEXT")
-        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS project_id INT")
-        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS fingerprint TEXT")
-        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS code TEXT")
-        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS note TEXT")
-        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS assigned_to INT")
-        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS updated_by INT")
-        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP DEFAULT NOW()")
-        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS context_before TEXT")
-        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS context_after TEXT")
-        cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS repo_path TEXT")
-        cur.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS repo_url TEXT")
-        cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS commit_sha TEXT")
-        cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS branch TEXT")
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+# --- Session & Cache Control Middleware ---
+app.add_middleware(SessionMiddleware, secret_key=os.getenv("SECRET_KEY", "dev-secret-key-change-in-production"))
 
 @app.get("/")
 def home():
@@ -949,157 +819,11 @@ def assign_issue_endpoint(issue_id: int, data: dict = Body(...), user_id: int = 
 
 # --- 🧠 AI SUGGESTIONS ---
 
+# --- AI SUGGESTIONS (Placeholder) ---
 @app.post("/ai/suggestions")
-async def get_ai_suggestions(data: dict = Body(...), user_id: int = Depends(get_current_user)):
-    from db.connection import get_connection
-    import json
-
-    # --- 🧠 Step 1: Fetch Personalization Data ---
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            "SELECT role_type, experience_level, tech_stack, plan, trial_ends FROM users WHERE id=%s",
-            (user_id,)
-        )
-        user_row = cur.fetchone()
-
-        if user_row:
-            role_type, experience_level, tech_stack, plan, trial_ends = user_row
-        else:
-            role_type, experience_level, tech_stack, plan, trial_ends = (
-                "developer", "intermediate", "Fullstack", "free", None
-            )
-    finally:
-        cur.close()
-        conn.close()
-
-    language = data.get("language", "en")
-    language_names = {"en": "English", "hi": "Hindi", "mr": "Marathi"}
-    language_name = language_names.get(language, "English")
-
-    # Basic AI experience for free users outside trial window
-    trial_active = False
-    if trial_ends:
-        if isinstance(trial_ends, str):
-            trial_ends = datetime.fromisoformat(trial_ends)
-        trial_active = datetime.now(timezone.utc) < trial_ends
-
-    project_name = data.get("project_name", "Unknown Project")
-    issues = data.get("issues", [])
-
-    if plan == "free" and not trial_active:
-        if not issues:
-            no_issue_text = {
-                "en": "No issues found yet. Start a scan to get AI insights!",
-                "hi": "अभी तक कोई मुद्दे नहीं मिले। AI इनसाइट्स के लिए अपना प्रोजेक्ट स्कैन करें!",
-                "mr": "अजून कोणतीही समस्या आढळली नाही. AI इनसाइटसाठी तुमचा प्रोजेक्ट स्कॅन करा!",
-            }
-            return {"suggestions": [no_issue_text.get(language, no_issue_text["en"])]}
-
-        severity_map = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
-        sorted_issues = sorted(
-            issues,
-            key=lambda item: severity_map.get((item.get("severity") or "").upper(), 0),
-            reverse=True,
-        )
-        top_issue = sorted_issues[0]
-        total_issues = len(sorted_issues)
-
-        templates = {
-            "en": {
-                "fix_top_issue": "Start by fixing the most critical issue: {title}.",
-                "review_issues": "Review all {count} issue(s) and prioritize HIGH and MEDIUM severity items.",
-                "rerun_scan": "Once fixed, rerun the scan to receive improved recommendations.",
-            },
-            "hi": {
-                "fix_top_issue": "सबसे महत्वपूर्ण मुद्दे को पहले ठीक करें: {title}.",
-                "review_issues": "सभी {count} मुद्दों की समीक्षा करें और HIGH तथा MEDIUM गंभीरता वाले आइटम पहले ठीक करें.",
-                "rerun_scan": "एक बार ठीक करने के बाद, बेहतर सिफारिशों के लिए स्कैन पुनः चलाएँ.",
-            },
-            "mr": {
-                "fix_top_issue": "सर्वात गंभीर समस्येची दुरुस्ती प्रथम करा: {title}.",
-                "review_issues": "सर्व {count} समस्या तपासा आणि HIGH आणि MEDIUM गंभीरतेच्या आयटमांना प्राधान्य द्या.",
-                "rerun_scan": "एकदा दुरुस्त केल्यावर, सुधारित शिफारसींसाठी पुन्हा स्कॅन चालवा.",
-            },
-        }
-
-        template = templates.get(language, templates["en"])
-        return {
-            "suggestions": [
-                template["fix_top_issue"].format(title=top_issue.get("title", "your top issue")),
-                template["review_issues"].format(count=total_issues),
-                template["rerun_scan"],
-            ]
-        }
-
-    # --- 🧠 Step 2: Extract Project Data ---
-    if not issues: 
-        return {"suggestions": [
-            {
-                "en": "No issues found yet. Start a scan to get AI insights!",
-                "hi": "अभी तक कोई मुद्दे नहीं मिले। AI इनसाइट्स के लिए अपना प्रोजेक्ट स्कैन करें!",
-                "mr": "अजून कोणतीही समस्या आढळली नाही. AI इनसाइटसाठी तुमचा प्रोजेक्ट स्कॅन करा!",
-            }.get(language, "No issues found yet. Start a scan to get AI insights!")
-        ]}
-    
-    # Create a compact summary of issues for the AI
-    issues_summary = "\n".join([f"- {i['severity']}: {i['title']}" for i in issues[:10]])
-
-    # --- 🧠 Step 3: The Personalized Prompt ---
-    prompt = f"""
-    You are a senior software architect and mentor. Provide 5 practical suggestions for this project.
-
-    LANGUAGE: Respond in {language_name}.
-
-    USER CONTEXT:
-    - Role: {role_type}
-    - Experience: {experience_level}
-    - Tech Stack: {tech_stack}
-
-    PROJECT: {project_name}
-
-    SECURITY ISSUES FOUND:
-    {issues_summary}
-
-    PERSONALIZATION RULES:
-    1. If user is a STUDENT: Explain concepts simply, suggest learning resources, and recommend beginner-friendly features.
-    2. If user is a PROFESSIONAL: Focus on architecture, scalability, and high-performance optimization.
-
-    OUTPUT FORMAT:
-    Return ONLY a raw JSON array of strings. No introductory text. 
-    Example: ["Suggestion 1", "Suggestion 2", "Suggestion 3", "Suggestion 4", "Suggestion 5"]
-    """
-
-    # --- 🧠 Step 4: Call AI Model ---
-    try:
-        completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.4, # Slightly higher for better creative suggestions
-        )
-        
-        ai_content = completion.choices[0].message.content.strip()
-        
-        # Parse the AI string into a clean Python list
-        suggestions_list = json.loads(ai_content)
-        return {"suggestions": suggestions_list}
-
-    except Exception as e:
-        print(f"🔥 AI/JSON Error: {e}")
-        # Robust fallback suggestions based on the user's role
-        if role_type == "student":
-            return {"suggestions": [
-                "Research the OWASP Top 10 to understand these vulnerabilities better.",
-                "Try fixing one High severity issue and verify it with a re-scan.",
-                "Use environment variables (.env) to hide your API keys."
-            ]}
-        else:
-            return {"suggestions": [
-                "Implement a stricter Content Security Policy (CSP).",
-                "Review the project architecture for potential bottlenecking.",
-                "Optimize database queries related to the flagged files."
-            ]}
+def get_ai_suggestions(data: dict = Body(...), user_id: int = Depends(get_current_user)):
+    """Placeholder for AI suggestions endpoint. To be integrated with Groq/OpenAI."""
+    return {"suggestions": ["AI suggestions coming soon! Please check back later."]}
     
 
 @app.post("/auth/onboarding")
@@ -1570,39 +1294,66 @@ def verify_payment(data: dict = Body(...), user_id: int = Depends(get_current_us
 
 @app.get("/auth/google")
 async def google_login(request: Request):
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        raise HTTPException(status_code=500, detail="Google OAuth configuration missing")
-    redirect_uri = GOOGLE_REDIRECT_URI
-    print(f"🔁 Google login redirect_uri: {redirect_uri}")
-    return await oauth.google.authorize_redirect(request, redirect_uri)
+    """
+    Google OAuth login redirect endpoint with error handling.
+    """
+    try:
+        if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+            print("[Google] ❌ Missing Google OAuth credentials in .env")
+            return RedirectResponse(url=f"{FRONTEND_URL}/login?error=google_config_missing")
+        
+        print(f"[Google] 🔁 Initiating OAuth flow, redirect_uri: {GOOGLE_REDIRECT_URI}")
+        return await oauth.google.authorize_redirect(request, redirect_uri=GOOGLE_REDIRECT_URI)
+    
+    except AttributeError as e:
+        print(f"[Google] ❌ OAuth client not registered: {str(e)}")
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=oauth_not_configured")
+    
+    except Exception as e:
+        print(f"[Google] ❌ Unexpected error during Google login: {str(e)}")
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=google_login_error")
 
 
 @app.get("/auth/google/callback")
 async def google_callback(request: Request):
-    token = await oauth.google.authorize_access_token(request)
-    user = token.get("userinfo")
+    """
+    Google OAuth callback with robust error handling.
+    """
+    try:
+        print(f"[Google] Starting OAuth callback...")
+        token = await oauth.google.authorize_access_token(request)
+        user = token.get("userinfo")
 
-    if not user:
-        try:
-            user = await oauth.google.parse_id_token(request, token)
-        except Exception as parse_err:
-            print(f"❌ Google ID token parse failed: {parse_err}")
-            raise HTTPException(status_code=400, detail="Unable to parse Google user info")
+        if not user:
+            print(f"[Google] No userinfo in token, attempting to parse ID token...")
+            try:
+                user = await oauth.google.parse_id_token(request, token)
+            except Exception as parse_err:
+                print(f"[Google] ❌ ID token parse failed: {parse_err}")
+                return RedirectResponse(url=f"{FRONTEND_URL}/login?error=google_parse_error")
 
-    email = user.get("email")
-    name = user.get("name") or user.get("email") or "Google User"
+        email = user.get("email")
+        name = user.get("name") or user.get("email") or "Google User"
 
-    if not email:
-        raise HTTPException(status_code=400, detail="Google did not return an email")
+        if not email:
+            print(f"[Google] ❌ No email returned from Google")
+            return RedirectResponse(url=f"{FRONTEND_URL}/login?error=no_email")
 
-    register_user(name, email, "google_user")
-    auth_data = oauth_login_user(email)
-    if auth_data and "access_token" in auth_data:
-        app_token = auth_data.get("access_token")
-    else:
-        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=auth_failed")
+        print(f"[Google] User: {name} ({email})")
+        register_user(name, email, "google_user")
+        
+        auth_data = oauth_login_user(email)
+        if auth_data and "access_token" in auth_data:
+            app_token = auth_data.get("access_token")
+            print(f"[Google] Login successful, generating JWT token")
+            return RedirectResponse(url=f"{FRONTEND_URL}/oauth-success?token={app_token}")
+        else:
+            print(f"[Google] JWT token generation failed")
+            return RedirectResponse(url=f"{FRONTEND_URL}/login?error=auth_failed")
 
-    return RedirectResponse(url=f"{FRONTEND_URL}/oauth-success?token={app_token}")
+    except Exception as e:
+        print(f"[Google] ❌ Unexpected error: {str(e)}")
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=google_error")
 
 
 @app.get("/auth/github")
@@ -1615,53 +1366,93 @@ def github_login():
 
 @app.get("/auth/github/callback")
 def github_callback(code: str):
+    """
+    GitHub OAuth callback with robust error handling and network timeout management.
+    """
     client_id = os.getenv("GITHUB_CLIENT_ID")
     client_secret = os.getenv("GITHUB_CLIENT_SECRET")
+    REQUEST_TIMEOUT = 10  # seconds
 
-    # 1. Exchange code for GitHub Access Token
-    token_res = requests.post(
-        "https://github.com/login/oauth/access_token",
-        headers={"Accept": "application/json"},
-        data={
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "code": code,
-        },
-    )
-    access_token = token_res.json().get("access_token")
+    try:
+        # 1. Exchange code for GitHub Access Token
+        print(f"[GitHub] Exchanging code for access token...")
+        token_res = requests.post(
+            "https://github.com/login/oauth/access_token",
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "code": code,
+            },
+            timeout=REQUEST_TIMEOUT,  # Prevent hanging indefinitely
+        )
+        token_res.raise_for_status()  # Raise exception for bad status codes
+        access_token = token_res.json().get("access_token")
 
-    if not access_token:
-        raise HTTPException(status_code=400, detail="Failed to retrieve access token from GitHub")
+        if not access_token:
+            error_msg = token_res.json().get("error_description", "No access token returned")
+            print(f"[GitHub] Token exchange failed: {error_msg}")
+            return RedirectResponse(url=f"{FRONTEND_URL}/login?error=token_exchange_failed")
 
-    # 2. Get User Info from GitHub API
-    user_res = requests.get(
-        "https://api.github.com/user",
-        headers={"Authorization": f"token {access_token}"}
-    )
-    user_data = user_res.json()
+        print(f"[GitHub] Successfully obtained access token")
 
-    # Handle cases where email might be private
-    email = user_data.get("email") or f"{user_data.get('login')}@github.com"
-    name = user_data.get("name") or user_data.get("login")
+        # 2. Get User Info from GitHub API
+        print(f"[GitHub] Fetching user profile...")
+        user_res = requests.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"token {access_token}"},
+            timeout=REQUEST_TIMEOUT,
+        )
+        user_res.raise_for_status()
+        user_data = user_res.json()
 
-    # 3. Register the user if they do not already exist.
-    user_exists = get_user_by_email(email)
-    if not user_exists:
-        result = register_oauth_user(name, email, "github_oauth_dummy_pass")
-        if not result.get("success"):
-            print(f"OAuth user creation warning: {result.get('message')}")
+        # Handle cases where email might be private
+        email = user_data.get("email") or f"{user_data.get('login')}@github.com"
+        name = user_data.get("name") or user_data.get("login")
+        print(f"[GitHub] User: {name} ({email})")
 
-    # 4. Generate our BUILDWISE app JWT token without requiring the password if the user already exists.
-    auth_data = oauth_login_user(email)
+        # 3. Register the user if they do not already exist
+        user_exists = get_user_by_email(email)
+        if not user_exists:
+            print(f"[GitHub] Creating new user: {email}")
+            result = register_oauth_user(name, email, "github_oauth_dummy_pass")
+            if not result.get("success"):
+                print(f"[GitHub] User creation warning: {result.get('message')}")
+        else:
+            print(f"[GitHub] User already exists: {email}")
+
+        # 4. Generate BuildWise JWT token
+        auth_data = oauth_login_user(email)
+        
+        if auth_data and "access_token" in auth_data:
+            app_token = auth_data.get("access_token")
+            print(f"[GitHub] Login successful, generating JWT token")
+            return RedirectResponse(
+                url=f"{FRONTEND_URL}/oauth-success?token={app_token}&gh_token={access_token}"
+            )
+        else:
+            print(f"[GitHub] JWT token generation failed")
+            return RedirectResponse(url=f"{FRONTEND_URL}/login?error=auth_failed")
+
+    except requests.exceptions.ConnectTimeout:
+        print(f"[GitHub] ❌ Connection timeout - GitHub API unreachable. Check internet connection.")
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=github_timeout")
     
-    if auth_data and "access_token" in auth_data:
-        app_token = auth_data.get("access_token")
-    else:
-        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=auth_failed")
-
-    return RedirectResponse(
-        url=f"{FRONTEND_URL}/oauth-success?token={app_token}&gh_token={access_token}"
-    )
+    except requests.exceptions.ReadTimeout:
+        print(f"[GitHub] ❌ Read timeout - GitHub API took too long to respond.")
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=github_timeout")
+    
+    except requests.exceptions.ConnectionError as e:
+        print(f"[GitHub] ❌ Connection error: {str(e)}")
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=github_connection_error")
+    
+    except requests.exceptions.RequestException as e:
+        print(f"[GitHub] ❌ Request error: {str(e)}")
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=github_request_error")
+    
+    except Exception as e:
+        print(f"[GitHub] ❌ Unexpected error: {str(e)}")
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=unexpected_error")
 
 @app.get("/github/repos")
 def get_github_repos(token: str = None):

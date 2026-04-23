@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -10,11 +10,38 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  // 2. Check for OAuth errors in URL params on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const errorCode = params.get("error");
+    
+    if (errorCode) {
+      const errorMessages = {
+        github_timeout: "GitHub API is unreachable. Please check your internet connection and try again.",
+        github_connection_error: "Failed to connect to GitHub. Check your network connection.",
+        github_request_error: "GitHub authentication request failed. Please try again.",
+        token_exchange_failed: "Failed to exchange authorization code with GitHub. Please try again.",
+        google_error: "Google authentication failed. Please try again.",
+        google_parse_error: "Failed to parse Google user information. Please try again.",
+        no_email: "Could not retrieve email from provider. Please try again.",
+        auth_failed: "Authentication failed. Please try again.",
+        unexpected_error: "An unexpected error occurred. Please try again.",
+      };
+      
+      setError(errorMessages[errorCode] || "Authentication failed. Please try again.");
+      
+      // Clear the error from URL
+      window.history.replaceState({}, document.title, "/login");
+    }
+  }, []);
 
   // 2. The Login Logic function
   const handleLogin = async (e) => {
     e.preventDefault();
     setError(""); // Clear previous errors
+    setLoading(true);
 
     try {
       const response = await fetch("http://localhost:8000/auth/login", {
@@ -39,23 +66,42 @@ export default function Login() {
         setError(data.detail || t("login.invalidError"));
       }
     } catch (err) {
-      setError(t("login.serverError"));
+      setError(t("login.serverError") || "Connection to server failed. Please check your internet.");
       console.error("Login Error:", err);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleGitHubLogin = async () => {
+    setLoading(true);
     try {
       const res = await fetch("http://localhost:8000/auth/github");
+      if (!res.ok) {
+        throw new Error("Failed to get GitHub authorization URL");
+      }
       const data = await res.json();
-      window.location.href = data.url;
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setError("GitHub authorization URL not available. Please try again.");
+      }
     } catch (err) {
-      alert("GitHub Login failed to initialize.");
+      setError("GitHub Login failed to initialize. Please check your connection and try again.");
+      setLoading(false);
+      console.error("GitHub Login Error:", err);
     }
   };
 
   const handleGoogleLogin = () => {
-    window.location.href = "http://localhost:8000/auth/google";
+    setLoading(true);
+    try {
+      window.location.href = "http://localhost:8000/auth/google";
+    } catch (err) {
+      setError("Google Login failed to initialize. Please try again.");
+      setLoading(false);
+      console.error("Google Login Error:", err);
+    }
   };
 
   return (
@@ -91,24 +137,27 @@ export default function Login() {
 
           <button 
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded transition-colors font-semibold"
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white py-2 rounded transition-colors font-semibold"
           >
-            {t("login.button")}
+            {loading ? "Logging in..." : t("login.button")}
           </button>
 
           <button
             type="button"
             onClick={handleGitHubLogin}
-            className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-xl hover:bg-black transition-all mt-4 font-bold"
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-xl hover:bg-black disabled:bg-gray-400 transition-all mt-4 font-bold"
           >
-            <i className="fab fa-github"></i> {t("login.github")}
+            <i className="fab fa-github"></i> {loading ? "Initializing..." : t("login.github")}
           </button>
           <button
             type="button"
             onClick={handleGoogleLogin}
-            className="w-full flex items-center justify-center gap-2 bg-red-500 text-white py-3 rounded-xl hover:bg-red-600 transition-all mt-3 font-bold"
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 bg-red-500 text-white py-3 rounded-xl hover:bg-red-600 disabled:bg-red-400 transition-all mt-3 font-bold"
           >
-            <i className="fab fa-google"></i> {t("login.google")}
+            <i className="fab fa-google"></i> {loading ? "Initializing..." : t("login.google")}
           </button>
         </form>
 
