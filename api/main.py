@@ -8,6 +8,8 @@ import time
 from difflib import SequenceMatcher
 from fastapi import FastAPI, Body, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from groq import Groq
 from dotenv import load_dotenv
 from db.connection import get_connection
@@ -53,6 +55,18 @@ FRONTEND_URL = get_env("FRONTEND_URL", "http://localhost:5173")
 
 app = FastAPI(title="BuildWise API")
 
+# --- Cache-Control Middleware (FIX: Prevent browser caching of protected pages) ---
+class CacheControlMiddleware(BaseHTTPMiddleware):
+    """Adds Cache-Control headers to prevent caching of protected endpoints"""
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        # Protected routes should not be cached
+        protected_paths = ["/api/", "/projects", "/teams", "/issues", "/scans"]
+        if any(request.url.path.startswith(path) for path in protected_paths):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, proxy-revalidate"
+            response.headers["Pragma"] = "no-cache"
+        return response
+
 # --- CORS Configuration ---
 app.add_middleware(
     CORSMiddleware,
@@ -70,6 +84,7 @@ app.add_middleware(
 )
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+app.add_middleware(CacheControlMiddleware)
 
 
 
