@@ -436,6 +436,7 @@ const Dashboard = () => {
       body: JSON.stringify({
         project_name: selectedProject.name,
         issues: currentIssues,
+        plan: planInfo?.plan || "free",
         language: i18n.language || "en",
       }),
     })
@@ -631,24 +632,32 @@ const Dashboard = () => {
                   style={{ width: `${Math.min(100, planInfo?.scan_count / Math.max(planInfo?.scan_limit, 1) * 100)}%` }}
                 />
               </div>
-              <p className="mt-2 text-sm text-gray-600">{planInfo?.scan_count ?? 0}/{planInfo?.scan_limit ?? 10} {t("dashboard.usage")}</p>
+              {planInfo?.plan === "business" || planInfo?.plan === "team" ? (
+                <p className="mt-2 text-sm text-green-600 font-semibold">♾️ Unlimited Scans</p>
+              ) : planInfo?.scan_count >= (planInfo?.scan_limit ?? 10) ? (
+                <p className="mt-2 text-sm text-red-600 font-semibold">⚠️ Scan limit reached ({planInfo?.scan_count}/{planInfo?.scan_limit})</p>
+              ) : (
+                <p className="mt-2 text-sm text-gray-600">{planInfo?.scan_count ?? 0}/{planInfo?.scan_limit ?? 10} {t("dashboard.usage")}</p>
+              )}
             </div>
           </div>
 
-          <div className="p-6 rounded-3xl bg-slate-50 border border-gray-100">
-            <p className="text-sm uppercase tracking-widest text-gray-500 font-bold">{t("dashboard.teamMembership")}</p>
-            <h2 className="mt-3 text-2xl font-black text-gray-900">{teams.length}</h2>
-            <p className="text-sm text-gray-500 mt-2">{t("dashboard.teamDescription")}</p>
-            <ul className="mt-4 space-y-3 text-sm text-gray-700">
-              {teams.slice(0, 3).map((team) => (
-                <li key={team.id} className="flex items-center justify-between gap-2">
-                  <span>{team.name}</span>
-                  <span className="text-xs uppercase tracking-widest text-blue-600 font-bold">{team.role}</span>
-                </li>
-              ))}
-              {teams.length === 0 && <li className="text-gray-500">{t("dashboard.noTeams")}</li>}
-            </ul>
-          </div>
+          {(planInfo?.plan === "business" || planInfo?.plan === "team") && (
+            <div className="p-6 rounded-3xl bg-slate-50 border border-gray-100">
+              <p className="text-sm uppercase tracking-widest text-gray-500 font-bold">{t("dashboard.teamMembership")}</p>
+              <h2 className="mt-3 text-2xl font-black text-gray-900">{teams.length}</h2>
+              <p className="text-sm text-gray-500 mt-2">{t("dashboard.teamDescription")}</p>
+              <ul className="mt-4 space-y-3 text-sm text-gray-700">
+                {teams.slice(0, 3).map((team) => (
+                  <li key={team.id} className="flex items-center justify-between gap-2">
+                    <span>{team.name}</span>
+                    <span className="text-xs uppercase tracking-widest text-blue-600 font-bold">{team.role}</span>
+                  </li>
+                ))}
+                {teams.length === 0 && <li className="text-gray-500">{t("dashboard.noTeams")}</li>}
+              </ul>
+            </div>
+          )}
 
           <div className="p-6 rounded-3xl bg-slate-50 border border-gray-100">
             <p className="text-sm uppercase tracking-widest text-gray-500 font-bold">{t("dashboard.quickActions")}</p>
@@ -824,7 +833,13 @@ const Dashboard = () => {
       </p>
       <button 
         className="mt-6 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-100 transition-all"
-        onClick={() => navigate("/scan")} // Or wherever your scan page is
+        onClick={() => {
+          const inputElement = document.querySelector('input[placeholder*="repo"]') || document.querySelector('input[type="text"]');
+          if (inputElement) {
+            inputElement.focus();
+            inputElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }}
       >
         {t("dashboard.emptyAction")}
       </button>
@@ -870,8 +885,7 @@ const Dashboard = () => {
             </section>
           )}
 
-          <div className="grid lg:grid-cols-2 gap-8 items-start">
-            <div className="space-y-8">
+          <div className="space-y-8 w-full">
               {selectedScan && (
                 <section className="space-y-4">
                   <h2 className="text-sm font-black text-gray-400 uppercase tracking-widest">{t("dashboard.detectedIssues")}</h2>
@@ -941,10 +955,9 @@ const Dashboard = () => {
                   )}
                 </section>
               )}
-            </div>
 
             {selectedIssue && (
-              <section className="p-8 bg-white rounded-3xl shadow-2xl border border-gray-100">
+              <section className="p-8 bg-white rounded-3xl shadow-2xl border border-gray-100 mt-8">
                 <h2 className="text-xl font-black mb-6">Issue Analysis</h2>
                 <div className="space-y-6">
                   {/* File Location Banner */}
