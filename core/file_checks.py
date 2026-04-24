@@ -410,27 +410,60 @@ def check_js_ast_secrets(path):
 
 # Rule 6: Check Duplicate Files
 def check_duplicate_files(path):
+    """
+    Detect duplicate files by hash, but only within the same file type.
+    This prevents false positives like api/config.py vs session.txt (both empty).
+    
+    Strategy:
+    1. Group files by extension (e.g., all .py together, all .js together)
+    2. Within each group, compute hash and flag duplicates
+    3. Skip empty files (often placeholders, not real duplicates)
+    4. Return clear message about which file is original
+    """
     issues = []
-    hashes = {}
+    hashes_by_ext = {}  # {ext: {hash: full_path}}
+    
     for root, dirs, files in os.walk(path):
         dirs[:] = [d for d in dirs if d not in IGNORE_FOLDERS]
         for file in files:
             if file in SAFE_FILES:
                 continue
+            
             full_path = os.path.join(root, file)
+            file_size = os.path.getsize(full_path)
+            
+            # Skip empty files — they're often just placeholders
+            if file_size == 0:
+                continue
+            
+            ext = os.path.splitext(file)[1].lower()
+            
+            # Only check logic files (code, docs) for duplicates
+            # Skip binary, lock files, etc.
+            if ext not in {'.py', '.java', '.js', '.jsx', '.ts', '.tsx', '.md', '.txt', '.json', '.yaml', '.yml'}:
+                continue
+            
             file_hash = get_file_hash(full_path)
-            if file_hash in hashes:
+            
+            # Initialize extension bucket if needed
+            if ext not in hashes_by_ext:
+                hashes_by_ext[ext] = {}
+            
+            if file_hash in hashes_by_ext[ext]:
+                original_path = hashes_by_ext[ext][file_hash]
                 issues.append({
                     "type": "REDUNDANCY",
                     "severity": "MEDIUM",
                     "file": os.path.relpath(full_path, path),
                     "line": None,
                     "title": "Duplicate file found",
-                    "why": f"This file is an exact copy of {os.path.relpath(hashes[file_hash], path)}",
-                    "fix": "Remove the duplicate file and reference the original"
+                    "why": f"This {ext} file is an exact copy of {os.path.relpath(original_path, path)} (discovered first)",
+                    "fix": "Remove this duplicate and replace imports/references with the original file path"
                 })
             else:
-                hashes[file_hash] = full_path
+                # First time seeing this hash for this extension
+                hashes_by_ext[ext][file_hash] = full_path
+    
     return issues
 
 # Rule 7: Repeated Code Detection

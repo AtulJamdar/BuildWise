@@ -1,5 +1,6 @@
 import base64
 import os
+import secrets
 from pydoc import text
 import re
 import difflib
@@ -45,6 +46,49 @@ def get_env(key, default=None):
     return value.strip() if isinstance(value, str) else value
 
 
+def initialize_secret_key():
+    """
+    Initialize SECRET_KEY with security-first approach.
+    
+    - In production: Requires explicit SECRET_KEY environment variable
+    - In development: Auto-generates secure temporary key with warning
+    - Prevents accidental use of weak defaults
+    """
+    secret_key = os.getenv("SECRET_KEY")
+    
+    if not secret_key:
+        environment = os.getenv("ENVIRONMENT", "development")
+        
+        if environment == "production":
+            raise RuntimeError(
+                "\n" + "="*70 + "\n"
+                "❌ CRITICAL SECURITY ERROR:\n"
+                "SECRET_KEY environment variable must be set in production.\n\n"
+                "Steps to fix:\n"
+                "  1. Generate a secure key: python -c 'import secrets; print(secrets.token_urlsafe(32))'\n"
+                "  2. Set environment variable: export SECRET_KEY=<generated-key>\n"
+                "  3. Restart the application\n"
+                "="*70 + "\n"
+            )
+        else:
+            # Development mode: Auto-generate temporary key
+            secret_key = secrets.token_urlsafe(32)
+            print(
+                "\n" + "!"*70 + "\n"
+                "⚠️  WARNING: Running in DEVELOPMENT mode\n"
+                "Generated temporary SECRET_KEY for this session.\n"
+                "Session data will be lost on restart.\n\n"
+                "To use a persistent key in development:\n"
+                "  1. Generate: python -c 'import secrets; print(secrets.token_urlsafe(32))'\n"
+                "  2. Add to .env: SECRET_KEY=<generated-key>\n"
+                "  3. Restart the application\n"
+                "!"*70 + "\n"
+            )
+    
+    return secret_key
+
+
+SECRET_KEY = initialize_secret_key()
 
 RAZORPAY_KEY_ID = get_env("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = get_env("RAZORPAY_KEY_SECRET")
@@ -95,7 +139,7 @@ app.add_middleware(
 )
 
 # --- Session & Cache Control Middleware ---
-app.add_middleware(SessionMiddleware, secret_key=os.getenv("SECRET_KEY", "dev-secret-key-change-in-production"))
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 @app.get("/")
 def home():

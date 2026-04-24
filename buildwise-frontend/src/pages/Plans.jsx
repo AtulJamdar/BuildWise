@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import Toast from "../components/Toast";
 
 export default function Plans() {
   const navigate = useNavigate();
@@ -7,6 +8,7 @@ export default function Plans() {
   const [loading, setLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("success");
   const [showBusinessForm, setShowBusinessForm] = useState(false);
   const [businessForm, setBusinessForm] = useState({
     company_name: "",
@@ -31,6 +33,7 @@ export default function Plans() {
       setUsage(data);
     } catch (err) {
       console.error("❌ Usage Fetch Error:", err);
+      setMessageType("error");
       setMessage("Failed to load usage data.");
     } finally {
       setLoading(false);
@@ -112,11 +115,12 @@ export default function Plans() {
               throw new Error(verifyData.detail || verifyData.error || "Payment verification failed");
             }
 
-            setMessage("Payment successful! Your plan has been upgraded.");
+            setMessageType("success");
             await fetchUsage();
           } catch (verifyErr) {
             console.error("❌ Verify Payment Error:", verifyErr);
             setMessage(`Payment verification failed: ${verifyErr.message}`);
+            setMessageType("error");
           }
         },
         theme: {
@@ -127,6 +131,7 @@ export default function Plans() {
       const rzp = new window.Razorpay(options);
       rzp.open();
     } catch (err) {
+      setMessageType("error");
       console.error("❌ Upgrade Error:", err);
       setMessage(`Upgrade failed: ${err.message}`);
     } finally {
@@ -155,11 +160,13 @@ export default function Plans() {
       }
 
       setMessage(data.message || "Thank you! We will contact you soon.");
+      setMessageType("success");
       setShowBusinessForm(false);
       setBusinessForm({ company_name: "", team_size: "", requirements: "" });
     } catch (err) {
       console.error("❌ Business Inquiry Error:", err);
       setMessage(`Error: ${err.message}`);
+      setMessageType("error");
     } finally {
       setIsProcessing(false);
     }
@@ -186,9 +193,12 @@ export default function Plans() {
           </div>
 
           {message && (
-            <div className="mb-6 rounded-3xl border border-green-200 bg-green-50 px-5 py-4 text-sm font-medium text-green-800">
-              {message}
-            </div>
+            <Toast 
+              message={message} 
+              type={messageType}
+              onClose={() => setMessage("")}
+              duration={5000}
+            />
           )}
 
           {/* Pricing Grid */}
@@ -196,7 +206,7 @@ export default function Plans() {
             {/* Free Plan */}
             <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
               <h2 className="text-xl font-bold">Free</h2>
-              <p className="mt-2 text-sm text-gray-500">$0/month</p>
+              <p className="mt-2 text-sm text-gray-500">₹0/month</p>
               <ul className="mt-4 space-y-2 text-sm text-gray-600">
                 <li>✔ 10 scans/month</li>
                 <li>✔ Basic analysis</li>
@@ -214,7 +224,7 @@ export default function Plans() {
             {/* Pro Plan */}
             <div className="rounded-3xl border-2 border-blue-500 bg-white p-6 shadow-lg">
               <h2 className="text-xl font-bold text-blue-600">Pro</h2>
-              <p className="mt-2 text-sm text-gray-500">$99/month</p>
+              <p className="mt-2 text-sm text-gray-500">₹999/month</p>
               <ul className="mt-4 space-y-2 text-sm text-gray-600">
                 <li>✔ 100 scans/month</li>
                 <li>✔ Private repo scanning</li>

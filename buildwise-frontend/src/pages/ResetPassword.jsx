@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import Toast from "../components/Toast";
 
 export default function ResetPassword() {
   const { token } = useParams();
@@ -50,10 +51,20 @@ export default function ResetPassword() {
         <h2 className="text-2xl font-bold mb-6 text-gray-800">{t("resetPassword.title")}</h2>
 
         {message && (
-          <div className="mb-4 p-3 text-sm text-green-700 bg-green-100 rounded">{message}</div>
+          <Toast 
+            message={message} 
+            type="success"
+            onClose={() => setMessage("")}
+            duration={5000}
+          />
         )}
         {error && (
-          <div className="mb-4 p-3 text-sm text-red-700 bg-red-100 rounded">{error}</div>
+          <Toast 
+            message={error} 
+            type="error"
+            onClose={() => setError("")}
+            duration={5000}
+          />
         )}
 
         <form onSubmit={handleReset}>
