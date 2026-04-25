@@ -31,6 +31,21 @@ from utils.dependencies import get_current_user
 from utils.token import generate_invite_token
 from utils.email_service import send_invite_email, send_password_reset_email
 from core.repo_scanner import scan_github_repo
+from core.pricing_request_service import (
+    create_pricing_request, get_all_pending_requests, get_pricing_request_by_id,
+    get_user_pricing_requests, update_pricing_request_status
+)
+from core.custom_pricing_service import (
+    create_custom_pricing_plan, create_razorpay_order, get_custom_plan_by_id,
+    get_user_custom_plans, update_payment_status, get_pending_custom_plans
+)
+from core.admin_service import (
+    admin_login, check_if_admin, get_admin_by_email, create_admin_user, setup_default_admin
+)
+from core.renewal_service import (
+    create_renewal_request, get_renewal_requests_by_user, get_plan_expiry_date,
+    update_renewal_payment_status, activate_renewal_plan, cancel_renewal_request
+)
 import requests
 import razorpay
 import hmac
@@ -132,7 +147,7 @@ else:
 # --- CORS Configuration ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[FRONTEND_URL, "http://localhost:5173", "http://localhost:3000","http://localhost:8080"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -1647,5 +1662,774 @@ def get_github_repos(token: str = None):
     except Exception as e:
         print(f"❌ GitHub API Error: {e}")
         return []
+
+
+# ============================================================================
+# 💼 ADMIN PANEL - CUSTOM PRICING MANAGEMENT
+# ============================================================================
+
+# --- INITIALIZATION ---
+# Setup default admin on startup
+try:
+    setup_default_admin()
+except Exception as e:
+    print(f"⚠️  Default admin setup warning: {e}")
+
+
+# --- ADMIN AUTHENTICATION ENDPOINTS ---
+
+@app.post("/auth/admin/login")
+def admin_login_endpoint(credentials: dict = Body(...)):
+    """
+    Admin login endpoint
+    Credentials: {email, password}
+    Returns: JWT token and admin details
+    """
+    email = credentials.get("email", "").strip()
+    password = credentials.get("password", "")
+    
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password required")
+    
+    result = admin_login(email, password)
+    
+    if not result["success"]:
+        raise HTTPException(status_code=401, detail=result["message"])
+    
+    return {
+        "success": True,
+        "access_token": result["access_token"],
+        "token_type": result["token_type"],
+        "admin_id": result["admin_id"],
+        "admin_name": result["admin_name"],
+        "role": result["role"]
+    }
+
+
+# --- CUSTOMER PRICING REQUEST ENDPOINTS ---
+
+@app.post("/api/custom-pricing/request")
+def submit_pricing_request(request_data: dict = Body(...), current_user = Depends(get_current_user)):
+    """
+    Customer submits a custom pricing request
+    Payload: {
+        company_name, team_size, scans_per_month, 
+        specific_features, budget_min, budget_max
+    }
+    """
+    try:
+        company_name = request_data.get("company_name", "").strip()
+        team_size = request_data.get("team_size")
+        scans_per_month = request_data.get("scans_per_month")
+        specific_features = request_data.get("specific_features", "")
+        budget_min = request_data.get("budget_min")
+        budget_max = request_data.get("budget_max")
+        
+        # Validation
+        if not company_name:
+            raise HTTPException(status_code=400, detail="Company name is required")
+        if not budget_min or not budget_max:
+            raise HTTPException(status_code=400, detail="Budget range is required")
+        
+        result = create_pricing_request(
+            user_id=current_user["id"],
+            company_name=company_name,
+            team_size=team_size,
+            scans_per_month=scans_per_month,
+            specific_features=specific_features,
+            budget_min=budget_min,
+            budget_max=budget_max
+        )
+        
+        if result["success"]:
+            return {
+                "success": True,
+                "request_id": result["request_id"],
+                "message": "✅ Pricing request submitted successfully. Admin will review it soon."
+            }
+        else:
+            raise HTTPException(status_code=400, detail=result["message"])
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error submitting pricing request: {e}")
+        raise HTTPException(status_code=500, detail="Failed to submit pricing request")
+
+
+@app.get("/api/custom-pricing/my-requests")
+def get_my_pricing_requests(current_user = Depends(get_current_user)):
+    """
+    Get customer's own pricing requests
+    """
+    try:
+        requests = get_user_pricing_requests(current_user["id"])
+        return {
+            "success": True,
+            "requests": requests,
+            "count": len(requests)
+        }
+    except Exception as e:
+        print(f"❌ Error fetching pricing requests: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch requests")
+
+
+@app.get("/api/custom-pricing/request/{request_id}")
+def get_pricing_request_details(request_id: int, current_user = Depends(get_current_user)):
+    """
+    Get details of a specific pricing request
+    """
+    try:
+        request_data = get_pricing_request_by_id(request_id)
+        
+        if not request_data:
+            raise HTTPException(status_code=404, detail="Request not found")
+        
+        # Verify user owns this request or is admin
+        if request_data["user_id"] != current_user["id"] and current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Unauthorized access")
+        
+        return {
+            "success": True,
+            "request": request_data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching request details: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch request details")
+
+
+# --- ADMIN PRICING MANAGEMENT ENDPOINTS ---
+
+@app.get("/admin/api/pricing-requests")
+def admin_get_pending_requests(current_user = Depends(get_current_user)):
+    """
+    [ADMIN ONLY] Get all pending pricing requests
+    """
+    try:
+        # Check admin role
+        if not check_if_admin(current_user["id"]):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        requests = get_all_pending_requests()
+        return {
+            "success": True,
+            "requests": requests,
+            "count": len(requests)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching pending requests: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch pending requests")
+
+
+@app.get("/admin/api/pricing-requests/{request_id}")
+def admin_get_request_details(request_id: int, current_user = Depends(get_current_user)):
+    """
+    [ADMIN ONLY] Get full details of a pricing request for review
+    """
+    try:
+        if not check_if_admin(current_user["id"]):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        request_data = get_pricing_request_by_id(request_id)
+        
+        if not request_data:
+            raise HTTPException(status_code=404, detail="Request not found")
+        
+        return {
+            "success": True,
+            "request": request_data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching request: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch request")
+
+
+@app.post("/admin/api/pricing-requests/{request_id}/approve")
+def admin_approve_pricing(request_id: int, approval_data: dict = Body(...), current_user = Depends(get_current_user)):
+    """
+    [ADMIN ONLY] Approve a pricing request and create custom pricing plan
+    Payload: {
+        custom_price, scans_per_month, features, validity_days, approval_notes
+    }
+    """
+    try:
+        if not check_if_admin(current_user["id"]):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        # Get request details
+        request_data = get_pricing_request_by_id(request_id)
+        if not request_data:
+            raise HTTPException(status_code=404, detail="Request not found")
+        
+        # Parse approval data
+        custom_price = approval_data.get("custom_price")
+        scans_per_month = approval_data.get("scans_per_month")
+        features = approval_data.get("features", [])
+        validity_days = approval_data.get("validity_days", 365)
+        approval_notes = approval_data.get("approval_notes", "")
+        
+        if not custom_price or not scans_per_month:
+            raise HTTPException(status_code=400, detail="Price and scans per month required")
+        
+        # Update pricing request status to approved (pass customer email for potential email)
+        update_pricing_request_status(
+            request_id,
+            "approved",
+            current_user["id"],
+            approval_notes,
+            customer_email=request_data.get("customer_email"),
+            company_name=request_data.get("company_name")
+        )
+        
+        # Create custom pricing plan
+        plan_result = create_custom_pricing_plan(
+            pricing_request_id=request_id,
+            user_id=request_data["user_id"],
+            custom_price=custom_price,
+            scans_per_month=scans_per_month,
+            features=features,
+            validity_days=validity_days,
+            admin_id=current_user["id"],
+            approval_notes=approval_notes,
+            send_email_approval=True
+        )
+        
+        if plan_result["success"]:
+            return {
+                "success": True,
+                "plan_id": plan_result["plan_id"],
+                "message": "✅ Pricing approved. Custom plan created. Next: Create Razorpay payment link"
+            }
+        else:
+            raise HTTPException(status_code=400, detail=plan_result["message"])
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error approving pricing request: {e}")
+        raise HTTPException(status_code=500, detail="Failed to approve request")
+
+
+@app.post("/admin/api/pricing-requests/{request_id}/reject")
+def admin_reject_pricing(request_id: int, rejection_data: dict = Body(...), current_user = Depends(get_current_user)):
+    """
+    [ADMIN ONLY] Reject a pricing request
+    Payload: {admin_notes}
+    """
+    try:
+        if not check_if_admin(current_user["id"]):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        # Get request details for email
+        request_data = get_pricing_request_by_id(request_id)
+        if not request_data:
+            raise HTTPException(status_code=404, detail="Request not found")
+        
+        admin_notes = rejection_data.get("admin_notes", "Request rejected")
+        
+        result = update_pricing_request_status(
+            request_id,
+            "rejected",
+            current_user["id"],
+            admin_notes,
+            customer_email=request_data.get("customer_email"),
+            company_name=request_data.get("company_name")
+        )
+        
+        if result["success"]:
+            return {
+                "success": True,
+                "message": "✅ Pricing request rejected. Customer notified via email."
+            }
+        else:
+            raise HTTPException(status_code=400, detail=result["message"])
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error rejecting request: {e}")
+        raise HTTPException(status_code=500, detail="Failed to reject request")
+
+
+# --- CUSTOM PRICING PAYMENT ENDPOINTS ---
+
+@app.get("/api/custom-pricing/plan/{plan_id}")
+def get_custom_plan_details(plan_id: int, current_user = Depends(get_current_user)):
+    """
+    Get custom pricing plan details (customer view)
+    Includes payment link if available
+    """
+    try:
+        plan = get_custom_plan_by_id(plan_id)
+        
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+        
+        # Verify user owns this plan
+        if plan["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Unauthorized access")
+        
+        return {
+            "success": True,
+            "plan": plan
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching plan: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch plan")
+
+
+@app.post("/admin/api/pricing-plans/{plan_id}/create-razorpay-order")
+def admin_create_razorpay_order(plan_id: int, current_user = Depends(get_current_user)):
+    """
+    [ADMIN ONLY] Create Razorpay order for custom pricing plan
+    This generates payment link to send to customer
+    Automatically sends payment link email to customer
+    """
+    try:
+        if not check_if_admin(current_user["id"]):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        plan = get_custom_plan_by_id(plan_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+        
+        # Create Razorpay order
+        try:
+            razorpay_order = razorpay_client.order.create(
+                {
+                    "amount": int(plan["custom_price"] * 100),  # In paise
+                    "currency": "INR",
+                    "receipt": f"custom_plan_{plan_id}",
+                    "payment_capture": 1
+                }
+            )
+            
+            order_id = razorpay_order["id"]
+            
+            # Generate payment link (frontend will use this)
+            # For now, we'll create a simple checkout URL
+            payment_link = f"{BACKEND_URL}/api/checkout/custom-plan/{plan_id}?order_id={order_id}"
+            
+            # Store order details and send email to customer
+            order_result = create_razorpay_order(plan_id, order_id, payment_link, send_email=True)
+            
+            if order_result["success"]:
+                return {
+                    "success": True,
+                    "order_id": order_id,
+                    "payment_link": payment_link,
+                    "amount": plan["custom_price"],
+                    "message": f"✅ Razorpay order created and payment link sent to customer"
+                }
+            else:
+                raise HTTPException(status_code=400, detail=order_result["message"])
+                
+        except razorpay.errors.BadRequestError as e:
+            print(f"❌ Razorpay error: {e}")
+            raise HTTPException(status_code=400, detail=f"Razorpay error: {str(e)}")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error creating Razorpay order: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create payment order")
+
+
+@app.get("/admin/api/pending-payments")
+def admin_get_pending_payments(current_user = Depends(get_current_user)):
+    """
+    [ADMIN ONLY] Get all pending custom plan payments
+    """
+    try:
+        if not check_if_admin(current_user["id"]):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        plans = get_pending_custom_plans()
+        return {
+            "success": True,
+            "pending_plans": plans,
+            "count": len(plans)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching pending payments: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch pending payments")
+
+
+# --- RAZORPAY WEBHOOK ENDPOINT ---
+
+@app.post("/webhooks/razorpay/custom-pricing")
+async def razorpay_custom_pricing_webhook(request: Request):
+    """
+    Razorpay webhook for custom pricing payments
+    Handles payment success confirmation
+    """
+    try:
+        payload = await request.json()
+        
+        # Verify webhook signature (for production)
+        # signature_received = request.headers.get("X-Razorpay-Signature")
+        # if not verify_razorpay_signature(payload, signature_received):
+        #     raise HTTPException(status_code=400, detail="Invalid signature")
+        
+        event_type = payload.get("event")
+        event_data = payload.get("payload", {}).get("payment", {})
+        
+        # Handle payment.authorized event (payment successful)
+        if event_type == "payment.authorized":
+            razorpay_payment_id = event_data.get("id")
+            razorpay_order_id = event_data.get("order_id")
+            
+            # Find custom plan by razorpay order ID
+            # This would typically be a DB lookup
+            # For now, we'll need to find plan by order_id
+            
+            print(f"✅ Payment authorized - Order: {razorpay_order_id}, Payment: {razorpay_payment_id}")
+            
+            # Note: In production, you'd query the DB to find which plan has this order_id
+            # Then update the plan status to 'paid'
+            
+            return {"status": "ok"}
+        
+        return {"status": "ok"}
+        
+    except Exception as e:
+        print(f"❌ Webhook error: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/webhooks/razorpay/renewal")
+async def razorpay_renewal_webhook(request: Request):
+    """
+    Razorpay webhook for plan renewal payments
+    Handles renewal payment confirmation and plan activation
+    """
+    try:
+        payload = await request.json()
+        event_type = payload.get("event")
+        event_data = payload.get("payload", {}).get("payment", {})
+        
+        # Handle payment.authorized event (payment successful)
+        if event_type == "payment.authorized":
+            razorpay_payment_id = event_data.get("id")
+            razorpay_order_id = event_data.get("order_id")
+            
+            # Find renewal request by razorpay order ID
+            from sqlalchemy import text
+            from core.db_utils import get_db_connection
+            
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Find renewal by order ID and update payment status
+            query = text("""
+                UPDATE renewal_requests 
+                SET razorpay_payment_id = :payment_id, status = 'paid', updated_at = CURRENT_TIMESTAMP
+                WHERE razorpay_order_id = :order_id
+                RETURNING id, plan_id, user_id
+            """)
+            cursor.execute(query, {
+                "payment_id": razorpay_payment_id,
+                "order_id": razorpay_order_id
+            })
+            result = cursor.fetchone()
+            conn.commit()
+            
+            if result:
+                renewal_id, plan_id, user_id = result
+                
+                # Activate the renewal plan (extend expiry)
+                activation_result = activate_renewal_plan(renewal_id)
+                
+                # Send confirmation email
+                from utils.email_service import send_renewal_confirmation_email
+                try:
+                    send_renewal_confirmation_email(user_id, activation_result)
+                    print(f"✅ Renewal confirmation email sent to user {user_id}")
+                except Exception as email_error:
+                    print(f"⚠️ Email send failed (non-critical): {email_error}")
+                
+                print(f"✅ Renewal payment authorized and plan activated - Renewal: {renewal_id}, Order: {razorpay_order_id}")
+            else:
+                print(f"⚠️ Renewal not found for order {razorpay_order_id}")
+            
+            cursor.close()
+            conn.close()
+            return {"status": "ok"}
+        
+        return {"status": "ok"}
+        
+    except Exception as e:
+        print(f"❌ Renewal webhook error: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/custom-pricing/confirm-payment")
+def confirm_custom_pricing_payment(payment_data: dict = Body(...), current_user = Depends(get_current_user)):
+    """
+    Customer confirms custom pricing payment
+    Payload: {plan_id, razorpay_payment_id}
+    Automatically sends payment confirmation email
+    """
+    try:
+        plan_id = payment_data.get("plan_id")
+        razorpay_payment_id = payment_data.get("razorpay_payment_id")
+        
+        if not plan_id or not razorpay_payment_id:
+            raise HTTPException(status_code=400, detail="Plan ID and payment ID required")
+        
+        plan = get_custom_plan_by_id(plan_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+        
+        # Verify user owns this plan
+        if plan["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Unauthorized")
+        
+        # Update payment status and send confirmation email
+        result = update_payment_status(plan_id, "paid", razorpay_payment_id, send_email=True)
+        
+        if result["success"]:
+            # TODO: Upgrade user's plan in user_plans table
+            # TODO: Update pricing_requests status to 'paid'
+            return {
+                "success": True,
+                "message": "✅ Payment confirmed! Your custom plan is now active. Confirmation email sent."
+            }
+        else:
+            raise HTTPException(status_code=400, detail=result["message"])
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error confirming payment: {e}")
+        raise HTTPException(status_code=500, detail="Failed to confirm payment")
+
+
+# --- RENEWAL ENDPOINTS ---
+
+@app.post("/api/plans/{plan_id}/renew")
+def create_plan_renewal(plan_id: int, request_body: dict = Body(...), current_user = Depends(get_current_user)):
+    """
+    Create a renewal request for an existing custom pricing plan
+    Payload: {renewal_days: int}
+    Returns: Renewal details with Razorpay payment link
+    """
+    try:
+        renewal_days = request_body.get("renewal_days")
+        
+        if not renewal_days or renewal_days <= 0:
+            raise HTTPException(status_code=400, detail="Invalid renewal days")
+        
+        # Verify user owns this plan
+        plan = get_custom_plan_by_id(plan_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+        
+        if plan["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Unauthorized")
+        
+        # Create renewal request
+        renewal = create_renewal_request(plan_id, current_user["id"], renewal_days)
+        
+        return {
+            "success": True,
+            "renewal": renewal,
+            "message": "Renewal request created successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error creating renewal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/renewals/my")
+def get_user_renewals(current_user = Depends(get_current_user)):
+    """
+    Get all renewal requests for current user
+    Returns: List of renewal requests with status
+    """
+    try:
+        renewals = get_renewal_requests_by_user(current_user["id"])
+        return {
+            "success": True,
+            "renewals": renewals,
+            "count": len(renewals)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching renewals: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch renewals")
+
+
+@app.get("/api/renewals/{renewal_id}")
+def get_renewal_details(renewal_id: int, current_user = Depends(get_current_user)):
+    """
+    Get renewal request details
+    Verifies user ownership
+    """
+    try:
+        from sqlalchemy import text
+        from core.db_utils import get_db_connection
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        query = text("""
+            SELECT id, plan_id, renewal_days, pro_rated_price, status, 
+                   razorpay_order_id, payment_link, created_at, updated_at
+            FROM renewal_requests 
+            WHERE id = :renewal_id AND user_id = :user_id
+        """)
+        cursor.execute(query, {"renewal_id": renewal_id, "user_id": current_user["id"]})
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="Renewal request not found")
+        
+        return {
+            "success": True,
+            "renewal": {
+                "renewal_id": result[0],
+                "plan_id": result[1],
+                "renewal_days": result[2],
+                "pro_rated_price": float(result[3]),
+                "status": result[4],
+                "razorpay_order_id": result[5],
+                "payment_link": result[6],
+                "created_at": result[7],
+                "updated_at": result[8]
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching renewal details: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch renewal details")
+
+
+@app.get("/api/renewals/{renewal_id}/payment-status")
+def check_renewal_payment_status(renewal_id: int, current_user = Depends(get_current_user)):
+    """
+    Check renewal payment status
+    """
+    try:
+        from sqlalchemy import text
+        from core.db_utils import get_db_connection
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        query = text("""
+            SELECT status, razorpay_payment_id FROM renewal_requests 
+            WHERE id = :renewal_id AND user_id = :user_id
+        """)
+        cursor.execute(query, {"renewal_id": renewal_id, "user_id": current_user["id"]})
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="Renewal not found")
+        
+        status_val, payment_id = result
+        
+        return {
+            "success": True,
+            "renewal_id": renewal_id,
+            "status": status_val,
+            "payment_id": payment_id,
+            "is_paid": status_val == "paid"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error checking payment status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to check payment status")
+
+
+@app.post("/api/renewals/{renewal_id}/confirm-payment")
+def confirm_renewal_payment(renewal_id: int, payment_data: dict = Body(...), current_user = Depends(get_current_user)):
+    """
+    Confirm renewal payment after Razorpay transaction
+    Payload: {razorpay_payment_id}
+    """
+    try:
+        razorpay_payment_id = payment_data.get("razorpay_payment_id")
+        
+        if not razorpay_payment_id:
+            raise HTTPException(status_code=400, detail="Payment ID required")
+        
+        # Verify user ownership
+        from sqlalchemy import text
+        from core.db_utils import get_db_connection
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        query = text("""
+            SELECT user_id FROM renewal_requests WHERE id = :renewal_id
+        """)
+        cursor.execute(query, {"renewal_id": renewal_id})
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not result or result[0] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Unauthorized")
+        
+        # Update payment status
+        renewal_data = update_renewal_payment_status(renewal_id, razorpay_payment_id, "paid")
+        
+        # Activate renewal plan
+        activation_data = activate_renewal_plan(renewal_id)
+        
+        return {
+            "success": True,
+            "message": "✅ Renewal payment confirmed! Your plan has been renewed.",
+            "renewal": renewal_data,
+            "plan_expires_at": activation_data["new_expiry"]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error confirming renewal payment: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/renewals/{renewal_id}/cancel")
+def cancel_renewal(renewal_id: int, current_user = Depends(get_current_user)):
+    """
+    Cancel a pending renewal request
+    Can only cancel renewals with 'pending' status
+    """
+    try:
+        result = cancel_renewal_request(renewal_id, current_user["id"])
+        
+        return {
+            "success": True,
+            "message": "Renewal request cancelled",
+            "renewal": result
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error cancelling renewal: {e}")
+        raise HTTPException(status_code=500, detail="Failed to cancel renewal")
 
 

@@ -16,6 +16,9 @@ import Projects from "./pages/Projects";
 import Teams from "./pages/Teams";
 import Sidebar from "./components/Sidebar";
 import Navbar from "./components/Navbar";
+import { AdminRoutes } from "./routes/AdminRoutes";
+import { CustomerPricingRoutes } from "./routes/CustomerPricingRoutes";
+import { PlanRenewal } from "./pages/PlanRenewal";
 
 function RequireAuth({ children }) {
   const location = useLocation();
@@ -1041,6 +1044,8 @@ function App() {
     "/profile",
     "/oauth-success",
     "/onboarding",
+    "/admin",
+    "/pricing",
   ];
   const showNavbar = location.pathname !== "/" && !protectedRoutes.some((route) => location.pathname.startsWith(route));
 
@@ -1055,6 +1060,16 @@ function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password/:token" element={<ResetPassword />} />
+        
+        {/* Admin Routes */}
+        <Route path="/admin/*" element={<AdminRoutes />} />
+        
+        {/* Plan Renewal - Direct Route (must be before wildcard) */}
+        <Route path="/pricing/plans/renew" element={<PlanRenewal />} />
+        
+        {/* Customer Pricing Routes (wildcard - must be last) */}
+        <Route path="/pricing/*" element={<CustomerPricingRoutes />} />
+        
         {/* We keep your dashboard on authenticated routes only */}
         <Route element={<RequireAuth><ProtectedLayout /></RequireAuth>}>
           <Route path="/dashboard" element={<Dashboard />} />
