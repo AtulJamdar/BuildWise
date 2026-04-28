@@ -51,11 +51,20 @@ export const AdminProvider = ({ children }) => {
    */
   const login = useCallback((adminData, token) => {
     try {
+      console.log('📝 AdminContext.login - Storing token:', token ? '✅ Token exists' : '❌ Token is null/undefined');
+      console.log('📝 AdminContext.login - Storing admin data:', adminData);
+      
       localStorage.setItem('admin_token', token);
       localStorage.setItem('admin_data', JSON.stringify(adminData));
+      
+      // Verify it was stored
+      const storedToken = localStorage.getItem('admin_token');
+      console.log('✅ AdminContext - Token stored verification:', storedToken ? 'SUCCESS' : 'FAILED');
+      
       setAdmin(adminData);
       setError(null);
     } catch (err) {
+      console.error('❌ AdminContext.login error:', err);
       setError('Failed to store admin data');
     }
   }, []);

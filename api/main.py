@@ -27,7 +27,7 @@ from core.issue_service import get_scan_issues, get_issue_by_id, get_issue_repo_
 from core.scanner import scan_project
 from core.user_service import login_user, oauth_login_user, register_user, register_oauth_user, get_user_by_email, generate_reset_token, reset_password, get_user_plan_info, increment_scan_count
 from core.team_service import create_team, get_user_teams, add_member_to_team, user_is_team_member, get_team_by_id, get_team_projects as get_team_projects_for_team
-from utils.dependencies import get_current_user
+from utils.dependencies import get_current_user, get_current_admin
 from utils.token import generate_invite_token
 from utils.email_service import send_invite_email, send_password_reset_email
 from core.repo_scanner import scan_github_repo

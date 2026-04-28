@@ -74,29 +74,51 @@ def admin_login(email, password):
     Authenticate admin login
     Returns JWT token if successful
     """
+    print(f"\n{'='*80}")
+    print(f"🔐 [ADMIN LOGIN] START")
+    print(f"{'='*80}")
+    print(f"📧 Email: {email}")
+    
     admin = get_admin_by_email(email)
     
     if not admin:
+        print(f"❌ Admin not found for email: {email}")
+        print(f"{'='*80}\n")
         return {
             "success": False,
             "message": "Admin not found"
         }
     
+    print(f"✅ Admin found:")
+    print(f"   - ID: {admin['id']}")
+    print(f"   - Email: {admin['email']}")
+    print(f"   - Role: {admin['role']}")
+    
     # Verify password
     if not verify_password(password, admin["password_hash"]):
+        print(f"❌ Password verification failed")
+        print(f"{'='*80}\n")
         return {
             "success": False,
             "message": "Invalid password"
         }
     
+    print(f"✅ Password verified")
+    
     # Create JWT token
-    token = create_access_token(
-        data={
-            "sub": admin["id"],
-            "email": admin["email"],
-            "role": admin["role"]
-        }
-    )
+    token_data = {
+        "sub": admin["id"],
+        "email": admin["email"],
+        "role": admin["role"]
+    }
+    
+    print(f"🔑 Creating token with payload:")
+    print(f"   {token_data}")
+    
+    token = create_access_token(data=token_data)
+    
+    print(f"✅ Token created: {token[:50]}...")
+    print(f"{'='*80}\n")
     
     return {
         "success": True,
