@@ -14,12 +14,6 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
  */
 const getAuthHeaders = () => {
   const token = localStorage.getItem('admin_token');
-  console.log('🔐 getAuthHeaders - Token from localStorage:', token ? '✅ Found' : '❌ NOT FOUND');
-  
-  if (!token) {
-    console.error('❌ CRITICAL: No admin_token in localStorage!');
-  }
-  
   return {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
@@ -46,10 +40,9 @@ export const adminLogin = async (email, password) => {
     }
 
     const data = await response.json();
-    console.log('🔐 adminLogin - Backend response:', data);
 
     // Transform backend response to match frontend expectations
-    const transformedResponse = {
+    return {
       token: data.access_token,
       admin: {
         id: data.admin_id,
@@ -57,11 +50,7 @@ export const adminLogin = async (email, password) => {
         role: data.role,
       },
     };
-    
-    console.log('✅ adminLogin - Transformed response:', transformedResponse);
-    return transformedResponse;
   } catch (error) {
-    console.error('❌ adminLogin error:', error);
     throw new Error(`Login error: ${error.message}`);
   }
 };
