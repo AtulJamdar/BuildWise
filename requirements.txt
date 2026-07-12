@@ -32,5 +32,7 @@ esprima==4.0.1
 tqdm==4.68.4
 
 # Build Tools
-setuptools>=83.0.0
-wheel
+setuptools==83.0.0
+wheel==0.47.0
+six==1.17.0
+
