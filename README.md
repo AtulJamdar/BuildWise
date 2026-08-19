@@ -153,5 +153,3 @@ Additional project documentation is available in the repository root:
 - Keep secrets out of source control; use environment variables for credentials and API keys.
 - For production, update OAuth redirect URLs and payment/email configuration before deployment.
 - Review the deployment documents before publishing the app.
-
-- done.
