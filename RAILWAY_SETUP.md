@@ -19,7 +19,7 @@ HUGGINGFACE_API_KEY=your_huggingface_api_key
 
 # GitHub OAuth
 GITHUB_CLIENT_ID=your_github_client_id
-GITHUB_CLIENT_SECRET=your_github_client_secret
+# TODO: replace hardcoded value with environment variable GITHUB_CLIENT_SECRET
 
 # Google OAuth  
 GOOGLE_CLIENT_ID=your_google_client_id
